@@ -1,0 +1,179 @@
+.tooltip {
+  position: absolute;
+  z-index: 20;
+  min-width: 176px;
+  background: rgba(9, 12, 22, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.60), inset 0 1px 0 rgba(255,255,255,0.05);
+  padding: 11px 14px 13px;
+  pointer-events: auto;
+  user-select: none;
+  animation: ttIn 110ms ease;
+}
+
+@keyframes ttIn {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+/* ── Header ────────────────────────────────────────────────────── */
+.ttHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ttDate {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(100, 116, 139, 0.80);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.ttClose {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: rgba(100, 116, 139, 0.55);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: color 100ms, background 100ms;
+}
+.ttClose:hover {
+  color: rgba(148, 163, 184, 0.9);
+  background: rgba(255,255,255,0.07);
+}
+
+/* ── OHLC grid ─────────────────────────────────────────────────── */
+.ohlcGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 14px;
+  margin-bottom: 6px;
+}
+
+.ohlcRow {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.ohlcKey {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(100, 116, 139, 0.60);
+  letter-spacing: 0.06em;
+  width: 10px;
+  flex-shrink: 0;
+}
+
+.ohlcVal {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: rgba(226, 232, 240, 0.88);
+}
+
+/* ── Volume ────────────────────────────────────────────────────── */
+.volRow {
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  color: rgba(100, 116, 139, 0.70);
+  margin-top: 2px;
+}
+
+/* ── Divider ───────────────────────────────────────────────────── */
+.ttDivider {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin: 9px 0 8px;
+}
+
+/* ── Indicator rows ────────────────────────────────────────────── */
+.indRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+.indRow:last-child { margin-bottom: 0; }
+
+.indDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+  top: -1px;
+}
+
+.indLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(100, 116, 139, 0.75);
+  letter-spacing: 0.04em;
+  min-width: 54px;
+}
+
+.indVal {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: rgba(226, 232, 240, 0.88);
+}
+
+/* ── BB multi-value row ────────────────────────────────────────── */
+.bbVals {
+  display: flex;
+  gap: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: rgba(226, 232, 240, 0.78);
+  flex-wrap: wrap;
+  line-height: 1.4;
+}
+
+.bbSep {
+  color: rgba(100, 116, 139, 0.40);
+}
+
+/* ── CVD section ───────────────────────────────────────────────── */
+.cvdGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cvdRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.cvdKey {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(100, 116, 139, 0.70);
+  letter-spacing: 0.04em;
+  min-width: 40px;
+}
+
+.cvdVal {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+}

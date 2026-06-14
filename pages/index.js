@@ -1,78 +1,170 @@
-import Image from "next/image";
-import { Geist, Geist_Mono } from "next/font/google";
+import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
+import { useSymbols }     from '../hooks/useSymbols';
+import { useBars }        from '../hooks/useBars';
+import { useFootprint }   from '../hooks/useFootprint';
+import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useCVD }         from '../hooks/useCVD';
+import { useDrawings }    from '../hooks/useDrawings';
+import AppHeader        from '../components/layout/AppHeader';
+import StatsBar         from '../components/layout/StatsBar';
+import TimeframeBar     from '../components/layout/TimeframeBar';
+import styles           from '../styles/app.module.css';
+import { DEFAULT_SETTINGS } from '../components/SettingsPanel';
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+const DrawingToolbar = dynamic(() => import('../components/charts/DrawingToolbar'), { ssr: false });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const TradingChart   = dynamic(() => import('../components/charts/TradingChart'),   { ssr: false });
+const FootprintChart = dynamic(() => import('../components/charts/FootprintChart'), { ssr: false });
+const ImportPanel    = dynamic(() => import('../components/ImportPanel'),             { ssr: false });
+const ManagePanel    = dynamic(() => import('../components/ManagePanel'),             { ssr: false });
+const IndicatorPanel = dynamic(() => import('../components/IndicatorPanel'),          { ssr: false });
+const SettingsPanel  = dynamic(() => import('../components/SettingsPanel'),           { ssr: false });
 
 export default function Home() {
-  return (
-    <div
-      className={`${geistSans.className} ${geistMono.className} flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black`}
-    >
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the index.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs/pages/getting-started?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+  const { symbols, symbolId, setSymbolId, loadSymbols, currentSym } = useSymbols();
+  const [tfId,      setTfId]      = useLocalStorage('grapher.tfId',      '1h');
+  const [chartMode, setChartMode] = useLocalStorage('grapher.chartMode', 'candle');
+  const [tickSize,  setTickSize]  = useState(5);
+  const [indicators,      setIndicators]      = useLocalStorage('grapher.indicators', []);
+  const [settings,        setSettings]        = useLocalStorage('grapher.settings',   DEFAULT_SETTINGS);
+  const [showImport,      setShowImport]      = useState(false);
+  const [showManage,      setShowManage]      = useState(false);
+  const [showIndicators,  setShowIndicators]  = useState(false);
+  const [showSettings,    setShowSettings]    = useState(false);
+
+  const {
+    drawings, activeTool, setActiveTool,
+    selectedId, setSelectedId,
+    addDrawing, updateDrawing, removeDrawing, clearAll,
+  } = useDrawings();
+
+  const { allBars, loading, loadingMore, hasMore, onLoadMore } = useBars(symbolId, tfId);
+
+  const hasTicks       = (currentSym?.tick_count ?? 0) > 0;
+  const inFootprint    = chartMode === 'footprint' && hasTicks;
+
+  const cvdData = useCVD(inFootprint ? null : symbolId, tfId);
+
+  // Footprint data — only fetched when footprint mode is active for a symbol with ticks
+  const {
+    bars: fpBars, loading: fpLoading, loadingMore: fpLoadingMore,
+    hasMore: fpHasMore, loadMore: fpLoadMore, error: fpError,
+  } = useFootprint(inFootprint ? symbolId : null, tickSize);
+
+  // Auto-fallback to candle when switching to a symbol without tick data
+  useEffect(() => {
+    if (chartMode === 'footprint' && !hasTicks) setChartMode('candle');
+  }, [hasTicks, chartMode]);
+
+  const onImported = (data) => {
+    setShowImport(false);
+    loadSymbols(data.symbolId);
+  };
+
+  const onDeleted = (deletedId) => {
+    // Si le symbole supprimé est celui actif, on recharge la liste (useSymbols se repositionne)
+    if (deletedId === symbolId) loadSymbols();
+    else loadSymbols(symbolId);
+  };
+
+  // ── Empty state ─────────────────────────────────────────────────────────────
+  if (symbols.length === 0) {
+    return (
+      <main className={styles.empty}>
+        <svg className={styles.emptyIcon} width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+          <rect x="6"  y="28" width="8"  height="14" rx="2" fill="#F59E0B" opacity="0.6"/>
+          <rect x="20" y="16" width="8"  height="26" rx="2" fill="#26A69A" opacity="0.6"/>
+          <rect x="34" y="8"  width="8"  height="34" rx="2" fill="#F59E0B" opacity="0.6"/>
+        </svg>
+        <h1 className={styles.emptyTitle}>No data yet</h1>
+        <p className={styles.emptyBody}>
+          Import an MT5 export file to get started. M1 bars are stored and instantly available at all timeframes.
+        </p>
+        <button className={styles.emptyBtn} onClick={() => setShowImport(true)}>
+          Import MT5 File
+        </button>
+        {showImport && <ImportPanel onClose={() => setShowImport(false)} onImported={onImported} />}
       </main>
+    );
+  }
+
+  // ── Main layout ─────────────────────────────────────────────────────────────
+  return (
+    <div className={styles.shell}>
+      <AppHeader
+        symbols={symbols}
+        symbolId={symbolId}
+        onSymbolChange={setSymbolId}
+        onImport={() => setShowImport(true)}
+        onManage={() => setShowManage(true)}
+        onSettings={() => setShowSettings(true)}
+      />
+      <StatsBar allBars={allBars} currentSym={currentSym} loading={loading} />
+      <TimeframeBar
+        tfId={tfId}          onTfChange={setTfId}
+        loading={loading}    loadingMore={loadingMore}
+        hasMore={hasMore}    barCount={allBars.length}
+        chartMode={chartMode} onChartModeChange={setChartMode}
+        hasTicks={hasTicks}
+        tickSize={tickSize}  onTickSizeChange={setTickSize}
+        indicatorCount={indicators.length}
+        onIndicators={() => setShowIndicators(true)}
+      />
+
+      {/* ── Chart area ───────────────────────────────────────────── */}
+      <div className={styles.chartArea} style={{ position: 'relative' }}>
+        <DrawingToolbar
+          activeTool={activeTool}
+          onToolChange={setActiveTool}
+          onClearAll={clearAll}
+        />
+        {inFootprint ? (
+          fpLoading ? (
+            <p className={styles.chartEmpty}>Loading footprint data…</p>
+          ) : fpError ? (
+            <p className={styles.chartEmpty}>Error: {fpError}</p>
+          ) : (
+            <FootprintChart
+              bars={fpBars}
+              tickSize={tickSize}
+              onLoadMore={fpLoadMore}
+              loadingMore={fpLoadingMore}
+              hasMore={fpHasMore}
+              imbalanceRatio={settings?.fpImbalanceRatio ?? 3}
+            />
+          )
+        ) : (
+          allBars.length > 0 ? (
+            <TradingChart
+                candles={allBars}
+                onLoadMore={onLoadMore}
+                indicators={indicators}
+                bullColor={settings?.bullColor ?? '#26A69A'}
+                bearColor={settings?.bearColor ?? '#EF5350'}
+                showVolume={settings?.showVolume ?? true}
+                cvdData={cvdData}
+                drawings={drawings}
+                activeTool={activeTool}
+                selectedId={selectedId}
+                onDrawingAdd={(type, points, style) => {
+                  addDrawing(type, points, style);
+                  setActiveTool(null); // retour curseur après chaque tracé
+                }}
+                onDrawingUpdate={updateDrawing}
+                onDrawingRemove={removeDrawing}
+                onDrawingSelect={setSelectedId}
+              />
+          ) : !loading && symbolId ? (
+            <p className={styles.chartEmpty}>No bars for this symbol / timeframe.</p>
+          ) : null
+        )}
+      </div>
+
+      {showImport      && <ImportPanel    onClose={() => setShowImport(false)}     onImported={onImported} />}
+      {showManage      && <ManagePanel    onClose={() => setShowManage(false)}     onDeleted={onDeleted} />}
+      {showIndicators  && <IndicatorPanel onClose={() => setShowIndicators(false)} indicators={indicators} onChange={setIndicators} />}
+      {showSettings    && <SettingsPanel  onClose={() => setShowSettings(false)}   settings={settings}     onChange={setSettings} />}
     </div>
   );
 }

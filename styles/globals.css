@@ -1,26 +1,134 @@
 @import "tailwindcss";
 
+/* ── Design Tokens ───────────────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Backgrounds */
+  --bg:        #0B0E17;
+  --surface:   #0D1220;
+  --surface-2: #111827;
+
+  /* Borders */
+  --border:    #1A2540;
+  --border-2:  #243155;
+
+  /* Text hierarchy */
+  --text:       #E2E8F0;
+  --text-muted: #94A3B8;
+  --text-dim:   #475569;
+  --text-ghost: #374151;
+  --text-faint: #2D3B55;
+
+  /* Signal colors */
+  --bull:       #26A69A;
+  --bull-bg:    rgba(38, 166, 154, 0.08);
+  --bull-bg-2:  rgba(38, 166, 154, 0.15);
+  --bull-ring:  rgba(38, 166, 154, 0.3);
+  --bear:       #EF5350;
+  --bear-bg:    rgba(239, 83, 80, 0.08);
+  --bear-bg-2:  rgba(239, 83, 80, 0.15);
+  --bear-ring:  rgba(239, 83, 80, 0.3);
+  --amber:      #F59E0B;
+  --amber-bg:   rgba(245, 158, 11, 0.10);
+  --amber-ring: rgba(245, 158, 11, 0.30);
+  --blue:       #60A5FA;
+  --blue-ring:  rgba(96, 165, 250, 0.3);
+
+  /* Typography */
+  --font:      Inter, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+
+  /* Radius */
+  --r-sm:  4px;
+  --r:     6px;
+  --r-lg:  8px;
+  --r-xl:  12px;
+  --r-2xl: 16px;
+  --r-pill: 999px;
+
+  /* Transitions */
+  --ease:     150ms ease;
+  --ease-out: 220ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Z layers */
+  --z-modal: 1000;
+
+  /* ── Glassmorphism / Depth ────────────────────────────────────── */
+  --glass-bg:          rgba(13, 18, 32, 0.82);
+  --glass-bg-heavy:    rgba(9, 12, 22, 0.92);
+  --glass-border:      rgba(255, 255, 255, 0.055);
+  --glass-border-bright: rgba(255, 255, 255, 0.10);
+  --glass-blur:        blur(12px);
+  --glass-blur-heavy:  blur(20px);
+
+  /* ── Glow effects ─────────────────────────────────────────────── */
+  --glow-bull:       0 0 14px rgba(38, 166, 154, 0.35);
+  --glow-bull-soft:  0 0 24px rgba(38, 166, 154, 0.18);
+  --glow-bear:       0 0 14px rgba(239, 83, 80, 0.35);
+  --glow-amber:      0 0 14px rgba(245, 158, 11, 0.35);
+  --glow-amber-text: 0 0 8px rgba(245, 158, 11, 0.55);
+  --glow-blue:       0 0 14px rgba(96, 165, 250, 0.35);
+
+  /* ── Elevation shadows ────────────────────────────────────────── */
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.40);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.50);
+  --shadow-xl: 0 24px 64px rgba(0, 0, 0, 0.75), 0 8px 24px rgba(0, 0, 0, 0.55);
+
+  /* ── Inset top-edge highlight (glass glint) ───────────────────── */
+  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Accessibility ───────────────────────────────────────────────────────── */
+button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+select:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { height: 4px; width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Global animations ───────────────────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 4px var(--bull); }
+  50%       { box-shadow: 0 0 10px var(--bull), 0 0 20px rgba(38, 166, 154, 0.15); }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  75%  { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }

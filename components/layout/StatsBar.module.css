@@ -1,0 +1,95 @@
+.bar {
+  border-bottom: 1px solid var(--glass-border);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: rgba(11, 14, 23, 0.70);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  height: 48px;
+}
+
+/* ── Price block ──────────────────────────────────────────────── */
+.priceBlock {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.price {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  transition: color var(--ease), text-shadow var(--ease);
+}
+
+.price.bull { color: var(--bull); text-shadow: var(--glow-bull); }
+.price.bear { color: var(--bear); text-shadow: var(--glow-bear); }
+
+.badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  transition: box-shadow var(--ease);
+}
+
+.badge.bull {
+  color: var(--bull);
+  background: rgba(38, 166, 154, 0.12);
+  border: 1px solid rgba(38, 166, 154, 0.28);
+  box-shadow: 0 0 8px rgba(38, 166, 154, 0.14);
+}
+.badge.bear {
+  color: var(--bear);
+  background: rgba(239, 83, 80, 0.12);
+  border: 1px solid rgba(239, 83, 80, 0.28);
+  box-shadow: 0 0 8px rgba(239, 83, 80, 0.14);
+}
+
+/* ── Divider ──────────────────────────────────────────────────── */
+.divider {
+  width: 1px;
+  height: 22px;
+  background: linear-gradient(to bottom, transparent 0%, var(--border-2) 40%, var(--border-2) 60%, transparent 100%);
+  flex-shrink: 0;
+}
+
+/* ── Stat item ────────────────────────────────────────────────── */
+.stat {
+  min-width: 68px;
+}
+
+.statLabel {
+  font-size: 9px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  margin-bottom: 3px;
+  font-weight: 600;
+}
+
+.statValue {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.statValue.bull { color: var(--bull); }
+.statValue.bear { color: var(--bear); }
+
+/* ── Empty / loading ──────────────────────────────────────────── */
+.placeholder {
+  font-size: 12px;
+  color: var(--text-ghost);
+}

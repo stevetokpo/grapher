@@ -1,0 +1,220 @@
+.bar {
+  padding: 6px 20px;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(10, 13, 21, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  flex-shrink: 0;
+  min-height: 40px;
+}
+
+.intervalLabel {
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 0.11em;
+  margin-right: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+/* ── Timeframe buttons ────────────────────────────────────────── */
+.tfBtn {
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font);
+  background: transparent;
+  color: var(--text-dim);
+  transition: color var(--ease), background var(--ease), border-color var(--ease), box-shadow var(--ease);
+  letter-spacing: 0.04em;
+}
+
+.tfBtn:hover {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border);
+}
+
+.tfBtn.active {
+  font-weight: 700;
+  background: rgba(245, 158, 11, 0.13);
+  border-color: rgba(245, 158, 11, 0.38);
+  color: var(--amber);
+  text-shadow: var(--glow-amber-text);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.14);
+}
+
+/* ── Status indicators ────────────────────────────────────────── */
+.status {
+  margin-left: 12px;
+  font-size: 11px;
+  color: var(--text-ghost);
+}
+
+.loadingMore {
+  margin-left: 12px;
+  font-size: 11px;
+  color: var(--text-ghost);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.loadingDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+  animation: blink 1s infinite;
+}
+
+.allLoaded {
+  margin-left: 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ── Spacer ───────────────────────────────────────────────────── */
+.spacer { flex: 1; }
+
+/* ── Indicators button ────────────────────────────────────────── */
+.indBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font);
+  background: transparent;
+  color: var(--text-dim);
+  margin-right: 6px;
+  flex-shrink: 0;
+  transition: color var(--ease), background var(--ease), border-color var(--ease), box-shadow var(--ease);
+  white-space: nowrap;
+}
+.indBtn:hover {
+  color: var(--blue);
+  background: rgba(96, 165, 250, 0.06);
+  border-color: rgba(96, 165, 250, 0.35);
+}
+.indBtnActive {
+  color: var(--blue);
+  background: rgba(96, 165, 250, 0.08);
+  border-color: rgba(96, 165, 250, 0.40);
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.12);
+}
+.indBtnActive:hover {
+  box-shadow: var(--glow-blue);
+}
+
+.indCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: rgba(96, 165, 250, 0.20);
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+/* ── Chart mode toggle ────────────────────────────────────────── */
+.viewToggle {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  background: rgba(9, 12, 22, 0.80);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 2px;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.viewBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 13px;
+  border-radius: var(--r-pill);
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font);
+  background: transparent;
+  color: var(--text-dim);
+  transition: color var(--ease), background var(--ease), box-shadow var(--ease);
+  white-space: nowrap;
+}
+
+.viewBtn:hover {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.viewBtn.viewActive {
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: var(--shadow-sm), var(--inset-hi);
+}
+
+/* ── Tick size control (footprint only) ──────────────────────── */
+.tickControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 10px;
+  flex-shrink: 0;
+}
+
+.tickLabel {
+  font-size: 10px;
+  color: var(--text-ghost);
+  letter-spacing: 0.09em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.tickSelect {
+  background: rgba(9, 12, 22, 0.80);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--bull);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 3px 24px 3px 11px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%2326A69A' stroke-width='1.2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color var(--ease), box-shadow var(--ease);
+  box-shadow: var(--shadow-sm);
+}
+
+.tickSelect:hover {
+  border-color: rgba(38, 166, 154, 0.45);
+  box-shadow: 0 0 8px rgba(38, 166, 154, 0.14);
+}
