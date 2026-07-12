@@ -1,3 +1,4 @@
+/* ── Toolbar container ────────────────────────────────────────────────────── */
 .toolbar {
   position:       absolute;
   top:            50%;
@@ -6,96 +7,20 @@
   z-index:        20;
   display:        flex;
   flex-direction: column;
+  align-items:    center;
   gap:            2px;
   background:     #0D1220;
   border:         1px solid #1A2540;
   border-radius:  9px;
   padding:        5px;
   box-shadow:     0 4px 20px rgba(0,0,0,0.55);
-  max-height:     calc(100% - 24px);
-  overflow-y:     auto;
-  scrollbar-width: none;
-  width:          36px;
-}
-.toolbar::-webkit-scrollbar { display: none; }
-
-/* ── Base button ─────────────────────────────────────────────────────── */
-.btn {
-  display:         flex;
-  align-items:     center;
-  justify-content: center;
-  width:           26px;
-  height:          26px;
-  border:          none;
-  border-radius:   5px;
-  background:      transparent;
-  color:           #4B5563;
-  cursor:          pointer;
-  transition:      background 100ms, color 100ms;
-  flex-shrink:     0;
-}
-.btn:hover  { background: #1A2540; color: #94A3B8; }
-.btn.active { background: #1D3461; color: #60A5FA; }
-
-/* ── Group trigger (same width as btn) ───────────────────────────────── */
-.groupTrigger {
-  display:         flex;
-  align-items:     center;
-  justify-content: center;
-  width:           26px;
-  height:          26px;
-  border:          none;
-  border-radius:   5px;
-  background:      transparent;
-  color:           #4B5563;
-  cursor:          pointer;
-  transition:      background 100ms, color 100ms;
-  position:        relative;
-}
-.groupTrigger:hover  { background: #1A2540; color: #8B9AB5; }
-.groupTrigger.open   { background: #162035; color: #8B9AB5; }
-.groupTrigger.hasActive { color: #60A5FA; }
-
-/* small chevron dot in bottom-right */
-.groupTrigger::after {
-  content:      '';
-  position:     absolute;
-  bottom:       3px;
-  right:        3px;
-  width:        4px;
-  height:       4px;
-  border-right: 1.5px solid currentColor;
-  border-bottom:1.5px solid currentColor;
-  transform:    rotate(45deg);
-  opacity:      0.5;
-  transition:   transform 150ms;
-}
-.groupTrigger.open::after {
-  transform: rotate(-135deg);
+  /* overflow must be visible so flyout is not clipped */
+  overflow:       visible;
 }
 
-/* ── Tool grid (inside an expanded group) ────────────────────────────── */
-.toolGrid {
-  display:               grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap:                   2px;
-  padding-top:           2px;
-}
-/* single-item rows (odd count) span both columns */
-.toolGrid .btn:last-child:nth-child(odd) {
-  grid-column: 1 / -1;
-}
-
-/* ── Divider ──────────────────────────────────────────────────────────── */
-.divider {
-  width:      22px;
-  height:     1px;
-  background: #1A2540;
-  margin:     2px auto;
-  flex-shrink: 0;
-}
-
-/* ── Clear-all button ─────────────────────────────────────────────────── */
+/* ── Shared button base ──────────────────────────────────────────────────── */
+.btn,
+.groupBtn,
 .clearBtn {
   display:         flex;
   align-items:     center;
@@ -105,8 +30,137 @@
   border:          none;
   border-radius:   5px;
   background:      transparent;
-  color:           #374151;
   cursor:          pointer;
   transition:      background 100ms, color 100ms;
+  flex-shrink:     0;
+  padding:         0;
 }
-.clearBtn:hover { background: rgba(239,83,80,0.15); color: #EF5350; }
+
+/* ── Cursor / generic button ─────────────────────────────────────────────── */
+.btn       { color: #4B5563; }
+.btn:hover { background: #1A2540; color: #94A3B8; }
+.btn.active { background: #1D3461; color: #60A5FA; }
+
+/* ── Group trigger button ────────────────────────────────────────────────── */
+.group { position: relative; }
+
+.groupBtn          { color: #4B5563; position: relative; }
+.groupBtn:hover    { background: #1A2540; color: #94A3B8; }
+.groupBtn.hasActive { color: #60A5FA; }
+.groupBtn.open     { background: #162035; color: #8B9AB5; }
+
+/* right-arrow indicator (chevron ›) */
+.groupBtn::after {
+  content:       '';
+  position:      absolute;
+  right:         3px;
+  top:           50%;
+  width:         4px;
+  height:        4px;
+  border-right:  1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform:     translateY(-65%) rotate(-45deg);
+  opacity:       0.45;
+  transition:    opacity 100ms;
+}
+.groupBtn:hover::after  { opacity: 0.7; }
+.groupBtn.open::after   { opacity: 0.9; }
+.groupBtn.hasActive::after { opacity: 0.9; }
+
+/* ── Flyout panel ────────────────────────────────────────────────────────── */
+.flyout {
+  position:      absolute;
+  left:          calc(100% + 10px);
+  top:           50%;
+  transform:     translateY(-50%);
+  background:    #0D1220;
+  border:        1px solid #1A2540;
+  border-radius: 8px;
+  padding:       5px;
+  display:       flex;
+  flex-direction: column;
+  gap:           1px;
+  z-index:       100;
+  box-shadow:    0 6px 24px rgba(0,0,0,0.65);
+  min-width:     164px;
+  /* Small left arrow / caret pointing at the trigger */
+  filter:        drop-shadow(0 0 8px rgba(0,0,0,0.4));
+}
+
+/* Flyout caret (CSS triangle pointing left) */
+.flyout::before {
+  content:      '';
+  position:     absolute;
+  right:        100%;
+  top:          50%;
+  transform:    translateY(-50%);
+  border:       6px solid transparent;
+  border-right: 6px solid #1A2540;
+  pointer-events: none;
+}
+.flyout::after {
+  content:      '';
+  position:     absolute;
+  right:        100%;
+  top:          50%;
+  transform:    translateY(-50%);
+  margin-right: -1px;
+  border:       6px solid transparent;
+  border-right: 6px solid #0D1220;
+  pointer-events: none;
+}
+
+.flyoutTitle {
+  font-size:     9px;
+  font-family:   Inter, system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color:         #374151;
+  padding:       2px 6px 4px;
+  user-select:   none;
+}
+
+.flyoutItem {
+  display:       flex;
+  align-items:   center;
+  gap:           8px;
+  padding:       5px 8px;
+  border:        none;
+  background:    transparent;
+  color:         #64748B;
+  border-radius: 5px;
+  cursor:        pointer;
+  width:         100%;
+  text-align:    left;
+  transition:    background 80ms, color 80ms;
+}
+.flyoutItem:hover { background: #162035; color: #CBD5E1; }
+.flyoutActive     { background: #1D3461 !important; color: #60A5FA !important; }
+
+.flyoutIcon {
+  display:    flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity:    0.85;
+}
+.flyoutItem:hover .flyoutIcon,
+.flyoutActive .flyoutIcon { opacity: 1; }
+
+.flyoutLabel {
+  font-size:   11px;
+  font-family: Inter, system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+/* ── Divider ─────────────────────────────────────────────────────────────── */
+.divider {
+  width:       20px;
+  height:      1px;
+  background:  #1A2540;
+  margin:      2px 0;
+  flex-shrink: 0;
+}
+
+/* ── Clear all ───────────────────────────────────────────────────────────── */
+.clearBtn       { color: #374151; }
+.clearBtn:hover { background: rgba(239,83,80,0.12); color: #EF5350; }

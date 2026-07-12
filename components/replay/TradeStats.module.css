@@ -1,0 +1,92 @@
+.bar {
+  min-height: 36px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: rgba(9, 12, 22, 0.60);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--inset-hi);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+/* ── Stat item ─────────────────────────────────────────────────── */
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  color: var(--text-ghost);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.value {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Separator ─────────────────────────────────────────────────── */
+.sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* ── Open trade pills ──────────────────────────────────────────── */
+.openList {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.tradePill {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid;
+  background: rgba(9, 12, 22, 0.55);
+  white-space: nowrap;
+}
+
+/* ── Spacer + reset ────────────────────────────────────────────── */
+.spacer { flex: 1; min-width: 0; }
+
+.resetBtn {
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--ease), border-color var(--ease), color var(--ease);
+}
+
+.resetBtn:hover {
+  background: rgba(239, 83, 80, 0.08);
+  border-color: rgba(239, 83, 80, 0.35);
+  color: var(--bear);
+}

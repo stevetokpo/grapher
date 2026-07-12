@@ -1,7 +1,14 @@
 import { fmtCount } from '../../lib/format';
 import styles from './AppHeader.module.css';
 
-export default function AppHeader({ symbols, symbolId, onSymbolChange, onImport, onManage, onSettings }) {
+export default function AppHeader({
+  symbols, symbolId, onSymbolChange,
+  onImport, onManage, onSettings, onReplay, onRsi, onChat,
+  isReplayMode = false,
+  replaySymbolName = '',
+  isRsiMode = false,
+  onBack,
+}) {
   return (
     <header className={styles.header}>
       <div className={styles.logo}>
@@ -14,28 +21,60 @@ export default function AppHeader({ symbols, symbolId, onSymbolChange, onImport,
         <span className={styles.logoText}>GRAPHER</span>
       </div>
 
-      <select
-        className={styles.symbolSelect}
-        value={symbolId ?? ''}
-        onChange={e => onSymbolChange(Number(e.target.value))}
-        aria-label="Select symbol"
-      >
-        {symbols.map(s => (
-          <option key={s.id} value={s.id}>
-            {s.name} ({fmtCount(s.bar_count)} bars)
-          </option>
-        ))}
-      </select>
+      {isReplayMode ? (
+        <span className={styles.replaySymbol}>{replaySymbolName}</span>
+      ) : (
+        <select
+          className={styles.symbolSelect}
+          value={symbolId ?? ''}
+          onChange={e => onSymbolChange(Number(e.target.value))}
+          aria-label="Select symbol"
+        >
+          {symbols.map(s => (
+            <option key={s.id} value={s.id}>
+              {s.name} ({fmtCount(s.bar_count)} bars)
+            </option>
+          ))}
+        </select>
+      )}
 
       <div className={styles.spacer} />
 
-      <button className={styles.manageBtn} onClick={onManage} aria-label="Gérer les symboles">
-        Gérer
-      </button>
-
-      <button className={styles.importBtn} onClick={onImport} aria-label="Import MT5 file">
-        + Import
-      </button>
+      {isReplayMode || isRsiMode ? (
+        <button className={styles.backBtn} onClick={onBack} aria-label="Retour au graphique">
+          ← Retour
+        </button>
+      ) : (
+        <>
+          <button className={styles.manageBtn} onClick={onManage} aria-label="Gérer les symboles">
+            Gérer
+          </button>
+          {onReplay && (
+            <button className={styles.replayBtn} onClick={onReplay} aria-label="Mode Replay">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ marginRight: 5 }}>
+                <polygon points="5,3 19,12 5,21"/>
+              </svg>
+              Replay
+            </button>
+          )}
+          {onRsi && (
+            <button className={styles.rsiBtn} onClick={onRsi} aria-label="Analyse RSI">
+              RSI
+            </button>
+          )}
+          {onChat && (
+            <button className={styles.aiBtn} onClick={onChat} aria-label="Assistant IA">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ marginRight: 5 }}>
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              IA
+            </button>
+          )}
+          <button className={styles.importBtn} onClick={onImport} aria-label="Import MT5 file">
+            + Import
+          </button>
+        </>
+      )}
 
       <button className={styles.settingsBtn} onClick={onSettings} aria-label="Réglages">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -44,10 +83,22 @@ export default function AppHeader({ symbols, symbolId, onSymbolChange, onImport,
         </svg>
       </button>
 
-      <div className={styles.live} aria-label="Live data">
-        <span className={styles.liveDot} />
-        <span className={styles.liveLabel}>LIVE</span>
-      </div>
+      {isReplayMode ? (
+        <div className={styles.replayBadge} aria-label="Mode Replay actif">
+          <span className={styles.replayDot} aria-hidden="true"/>
+          <span className={styles.replayLabel}>REPLAY</span>
+        </div>
+      ) : isRsiMode ? (
+        <div className={styles.rsiBadge} aria-label="Mode RSI actif">
+          <span className={styles.rsiDot} aria-hidden="true"/>
+          <span className={styles.rsiLabel}>RSI</span>
+        </div>
+      ) : (
+        <div className={styles.live} aria-label="Live data">
+          <span className={styles.liveDot} />
+          <span className={styles.liveLabel}>LIVE</span>
+        </div>
+      )}
     </header>
   );
 }

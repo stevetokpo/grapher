@@ -149,6 +149,182 @@
   transform: rotate(30deg);
 }
 
+/* ── Replay symbol (static text in replay mode) ───────────────── */
+.replaySymbol {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--amber);
+  letter-spacing: 0.04em;
+  opacity: 0.90;
+}
+
+/* ── Back button (replay mode) ────────────────────────────────── */
+.backBtn {
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+  background: rgba(13, 18, 32, 0.55);
+  color: var(--text-muted);
+  box-shadow: var(--inset-hi);
+  transition: background var(--ease), border-color var(--ease), color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+
+.backBtn:hover {
+  background: rgba(96, 165, 250, 0.07);
+  border-color: rgba(96, 165, 250, 0.40);
+  color: var(--blue);
+  box-shadow: var(--glow-blue), var(--inset-hi);
+}
+
+.backBtn:active { transform: scale(0.97); }
+
+/* ── Replay button (main header) ──────────────────────────────── */
+.replayBtn {
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.10), rgba(245, 158, 11, 0.05));
+  color: var(--amber);
+  box-shadow: var(--inset-hi);
+  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease), color var(--ease), transform var(--ease);
+}
+
+.replayBtn:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.10));
+  border-color: rgba(245, 158, 11, 0.65);
+  box-shadow: var(--glow-amber), var(--inset-hi);
+  color: #fbbf24;
+}
+
+.replayBtn:active { transform: scale(0.97); }
+
+/* ── RSI button (main header) ─────────────────────────────────── */
+.rsiBtn {
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(244, 114, 182, 0.35);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  background: rgba(244, 114, 182, 0.08);
+  color: #F472B6;
+  box-shadow: var(--inset-hi);
+  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+.rsiBtn:hover {
+  background: rgba(244, 114, 182, 0.16);
+  border-color: rgba(244, 114, 182, 0.65);
+  box-shadow: 0 0 14px rgba(244, 114, 182, 0.30), var(--inset-hi);
+}
+.rsiBtn:active { transform: scale(0.97); }
+
+/* ── IA button (main header) ──────────────────────────────────── */
+.aiBtn {
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font);
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.12), rgba(96, 165, 250, 0.06));
+  color: #C4B5FD;
+  box-shadow: var(--inset-hi);
+  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease), color var(--ease), transform var(--ease);
+}
+.aiBtn:hover {
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.20), rgba(96, 165, 250, 0.10));
+  border-color: rgba(167, 139, 250, 0.65);
+  box-shadow: 0 0 14px rgba(167, 139, 250, 0.30), var(--inset-hi);
+  color: #DDD6FE;
+}
+.aiBtn:active { transform: scale(0.97); }
+
+/* ── RSI badge (replaces LIVE in RSI mode) ─────────────────────── */
+.rsiBadge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.rsiDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #F472B6;
+  box-shadow: 0 0 8px rgba(244, 114, 182, 0.70);
+  animation: rsi-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes rsi-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.40; }
+}
+
+.rsiLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #F472B6;
+  opacity: 0.70;
+}
+
+/* ── Replay badge (replaces LIVE in replay mode) ──────────────── */
+.replayBadge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.replayDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: var(--glow-amber);
+  animation: replay-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes replay-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+.replayLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--amber);
+  opacity: 0.70;
+}
+
 /* ── Live indicator ───────────────────────────────────────────── */
 .live {
   display: flex;

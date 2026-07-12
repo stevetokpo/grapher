@@ -3,10 +3,14 @@ import { query } from '../../lib/db';
 // Map UI timeframe id → DuckDB interval string (null = raw M1)
 const TF_INTERVAL = {
   '1m':  null,
+  '3m':  '3 minutes',
   '5m':  '5 minutes',
+  '10m': '10 minutes',
   '15m': '15 minutes',
+  '20m': '20 minutes',
   '30m': '30 minutes',
   '1h':  '1 hour',
+  '2h':  '2 hours',
   '4h':  '4 hours',
   '1D':  '1 day',
   '1W':  '1 week',

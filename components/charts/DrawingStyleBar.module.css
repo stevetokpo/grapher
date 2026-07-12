@@ -1,0 +1,135 @@
+/* ── Floating bar ────────────────────────────────────────────────────────── */
+.bar {
+  position:        absolute;
+  top:             10px;
+  left:            50%;
+  transform:       translateX(-50%);
+  z-index:         25;
+  display:         flex;
+  align-items:     center;
+  gap:             4px;
+  background:      #0D1220;
+  border:          1px solid #1A2540;
+  border-radius:   8px;
+  padding:         5px 8px;
+  box-shadow:      0 4px 20px rgba(0,0,0,0.6);
+  /* Prevent bar from being wider than the chart */
+  max-width:       calc(100% - 80px);
+  flex-wrap:       wrap;
+}
+
+/* ── Row (group of controls) ─────────────────────────────────────────────── */
+.row {
+  display:     flex;
+  align-items: center;
+  gap:         3px;
+}
+
+/* ── Separator ───────────────────────────────────────────────────────────── */
+.sep {
+  width:      1px;
+  height:     18px;
+  background: #1A2540;
+  flex-shrink: 0;
+  margin:     0 1px;
+}
+
+/* ── Color swatches ──────────────────────────────────────────────────────── */
+.swatch {
+  width:        14px;
+  height:       14px;
+  border-radius: 50%;
+  border:       1.5px solid transparent;
+  cursor:       pointer;
+  flex-shrink:  0;
+  padding:      0;
+  transition:   border-color 80ms, transform 80ms;
+}
+.swatch:hover  { border-color: rgba(255,255,255,0.5); transform: scale(1.15); }
+.swatchOn      { border-color: #fff !important; box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
+
+/* ── Custom color picker ─────────────────────────────────────────────────── */
+.colorPickerWrap {
+  width:         14px;
+  height:        14px;
+  border-radius: 50%;
+  /* rainbow gradient to hint "custom color" */
+  background:    conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  border:        1.5px solid #2D3748;
+  cursor:        pointer;
+  overflow:      hidden;
+  flex-shrink:   0;
+  display:       flex;
+  align-items:   center;
+  justify-content: center;
+  transition:    border-color 80ms;
+}
+.colorPickerWrap:hover { border-color: rgba(255,255,255,0.5); }
+
+.colorPickerInput {
+  opacity:  0;
+  width:    100%;
+  height:   100%;
+  cursor:   pointer;
+  padding:  0;
+  border:   none;
+}
+
+/* ── Line width buttons ──────────────────────────────────────────────────── */
+.wBtn {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  width:           28px;
+  height:          24px;
+  border:          none;
+  border-radius:   4px;
+  background:      transparent;
+  color:           #64748B;
+  cursor:          pointer;
+  transition:      background 80ms, color 80ms;
+  padding:         0 4px;
+}
+.wBtn:hover { background: #162035; color: #CBD5E1; }
+.wBtn.on    { background: #1D3461; color: #60A5FA; }
+
+.wLine {
+  width:        16px;
+  background:   currentColor;
+  border-radius: 1px;
+  /* height set inline (1px / 1.5px / 2.5px) */
+}
+
+/* ── Line style buttons ──────────────────────────────────────────────────── */
+.lsBtn {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  height:          24px;
+  padding:         0 5px;
+  border:          none;
+  border-radius:   4px;
+  background:      transparent;
+  color:           #64748B;
+  cursor:          pointer;
+  transition:      background 80ms, color 80ms;
+}
+.lsBtn:hover { background: #162035; color: #CBD5E1; }
+.lsBtn.on    { background: #1D3461; color: #60A5FA; }
+
+/* ── Delete button ───────────────────────────────────────────────────────── */
+.delBtn {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  width:           26px;
+  height:          24px;
+  border:          none;
+  border-radius:   4px;
+  background:      transparent;
+  color:           #4B5563;
+  cursor:          pointer;
+  padding:         0;
+  transition:      background 80ms, color 80ms;
+}
+.delBtn:hover { background: rgba(239,83,80,0.12); color: #EF5350; }

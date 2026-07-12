@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, CrosshairMode, LineStyle } from 'lightweight-charts';
 import { calcMA, calcRSI, calcBB, calcSwings } from '../../lib/indicators';
+import { calcTwinsBars, calcFVG, calcHBHBHB, calcCompression, calcHBHB } from '../../lib/patterns';
+import { createFvgPrimitive } from './FvgPrimitive';
+import { createHbhPrimitive } from './HbhPrimitive';
+import { createHbhbPrimitive } from './HbhbPrimitive';
+import { createCompressionPrimitive } from './CompressionPrimitive';
 import DrawingCanvas from './DrawingCanvas';
+import TradeSetup    from '../replay/TradeSetup';
 import styles from './TradingChart.module.css';
 
 const PREFETCH_THRESHOLD = 50;
@@ -49,11 +55,19 @@ function rsiMargins(rsiH) {
 export default function TradingChart({
   candles, onLoadMore,
   indicators = [],
+  patterns = [],
+  chartMode = 'candle',
   bullColor = '#26A69A', bearColor = '#EF5350',
   showVolume = true,
   cvdData = null,
   drawings = [], activeTool = null, selectedId = null,
   onDrawingAdd, onDrawingUpdate, onDrawingRemove, onDrawingSelect,
+  replayPlaying = false,
+  openTrades = [],
+  tradeSetupActive = false,
+  tradeSetupEntry  = null,
+  onTradeSetupConfirm,
+  onTradeSetupCancel,
 }) {
   const mainRef            = useRef(null);
   const mainWrapRef        = useRef(null);
@@ -62,13 +76,21 @@ export default function TradingChart({
   const chartRef        = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
-  const maSeriesMapRef    = useRef(new Map());
-  const bbSeriesMapRef    = useRef(new Map());
-  const swingSeriesMapRef = useRef(new Map());
-  const rsiSeriesMapRef   = useRef(new Map());
-  const onLoadMoreRef     = useRef(onLoadMore);
-  useEffect(() => { onLoadMoreRef.current = onLoadMore; }, [onLoadMore]);
+  const maSeriesMapRef      = useRef(new Map());
+  const bbSeriesMapRef      = useRef(new Map());
+  const swingSeriesMapRef   = useRef(new Map());
+  const rsiSeriesMapRef     = useRef(new Map());
+  const patternSeriesMapRef = useRef(new Map());
+  const fvgPrimitiveRef         = useRef(null);
+  const hbhPrimitiveRef         = useRef(null);
+  const hbhbPrimitiveRef        = useRef(null);
+  const compressionPrimitiveRef = useRef(null);
+  const onLoadMoreRef      = useRef(onLoadMore);
+  const replayPlayingRef   = useRef(replayPlaying);
+  useEffect(() => { onLoadMoreRef.current    = onLoadMore;    }, [onLoadMore]);
+  useEffect(() => { replayPlayingRef.current = replayPlaying; }, [replayPlaying]);
 
+  const tradePriceLinesRef = useRef([]);
   const candlesByTimeRef = useRef(new Map());
   const maDataMapRef     = useRef(new Map());
   const bbDataMapRef     = useRef(new Map());
@@ -78,6 +100,43 @@ export default function TradingChart({
 
   const [tooltip, setTooltip] = useState(null);
   const tooltipRef = useRef(null);
+
+  // ── Screenshot → presse-papier ────────────────────────────────────────────
+  const [shotState, setShotState] = useState(null); // null | 'copied' | 'error'
+  const shotTimerRef = useRef(null);
+
+  const takeScreenshot = useCallback(async () => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    clearTimeout(shotTimerRef.current);
+    try {
+      const shot = chart.takeScreenshot(); // canvas LWC (fond transparent)
+      const out = document.createElement('canvas');
+      out.width  = shot.width;
+      out.height = shot.height;
+      const ctx = out.getContext('2d');
+      ctx.fillStyle = BG_MAIN;            // fond opaque sous le graphe
+      ctx.fillRect(0, 0, out.width, out.height);
+      ctx.drawImage(shot, 0, 0);
+
+      // Superpose le calque de dessins s'il existe.
+      const overlay = mainWrapRef.current?.querySelector('canvas[data-drawing-layer]');
+      if (overlay && overlay.width && overlay.height) {
+        ctx.drawImage(overlay, 0, 0, out.width, out.height);
+      }
+
+      const blob = await new Promise(res => out.toBlob(res, 'image/png'));
+      if (!blob) throw new Error('toBlob a échoué');
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      setShotState('copied');
+    } catch (err) {
+      console.error('[screenshot]', err);
+      setShotState('error');
+    }
+    shotTimerRef.current = setTimeout(() => setShotState(null), 1900);
+  }, []);
+
+  useEffect(() => () => clearTimeout(shotTimerRef.current), []);
 
   // RSI pane height as a fraction of total chart height
   const [rsiH, setRsiH]   = useState(RSI_H_DEFAULT);
@@ -235,10 +294,15 @@ export default function TradingChart({
       bbSeriesMapRef.current.clear();
       swingSeriesMapRef.current.clear();
       rsiSeriesMapRef.current.clear();
+      patternSeriesMapRef.current.clear();
+      fvgPrimitiveRef.current  = null;
+      hbhPrimitiveRef.current  = null;
+      hbhbPrimitiveRef.current = null;
       candlesByTimeRef.current.clear();
       maDataMapRef.current.clear();
       bbDataMapRef.current.clear();
       rsiDataMapRef.current.clear();
+      tradePriceLinesRef.current = [];
       chart.remove();
     };
   }, []);
@@ -281,6 +345,50 @@ export default function TradingChart({
     volumeSeriesRef.current.applyOptions({ visible: showVolume });
   }, [showVolume]);
 
+  // ── Trade price lines (entry / TP / SL for open trades) ──────────────────
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    // Remove previous lines
+    for (const pl of tradePriceLinesRef.current) {
+      try { series.removePriceLine(pl); } catch {}
+    }
+    tradePriceLinesRef.current = [];
+
+    for (const trade of openTrades) {
+      const isBuy   = trade.direction === 'BUY';
+      const clrBase = isBuy ? '#26A69A' : '#EF5350';
+
+      tradePriceLinesRef.current.push(
+        series.createPriceLine({
+          price: trade.entryPrice,
+          color: clrBase + '80',
+          lineStyle: LineStyle.Dashed,
+          lineWidth: 1,
+          axisLabelVisible: true,
+          title: `${trade.direction}`,
+        }),
+        series.createPriceLine({
+          price: trade.tp,
+          color: '#26A69A',
+          lineStyle: LineStyle.Solid,
+          lineWidth: 1,
+          axisLabelVisible: true,
+          title: 'TP',
+        }),
+        series.createPriceLine({
+          price: trade.sl,
+          color: '#EF5350',
+          lineStyle: LineStyle.Solid,
+          lineWidth: 1,
+          axisLabelVisible: true,
+          title: 'SL',
+        }),
+      );
+    }
+  }, [openTrades]);
+
   // ── Candle + volume data ──────────────────────────────────────────────────
   useEffect(() => {
     if (!candleSeriesRef.current || !candles?.length) return;
@@ -296,7 +404,11 @@ export default function TradingChart({
         color: close >= open ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
       })),
     );
-    prevRange ? ts.setVisibleRange(prevRange) : ts.fitContent();
+    if (replayPlayingRef.current) {
+      ts.scrollToRealTime();
+    } else {
+      prevRange ? ts.setVisibleRange(prevRange) : ts.fitContent();
+    }
     candlesByTimeRef.current = new Map(candles.map(c => [c.time, c]));
   }, [candles]);
 
@@ -457,6 +569,224 @@ export default function TradingChart({
     }
   }, [candles, indicators]);
 
+  // ── Pattern markers ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    // Zone patterns (FVG, HBH/BHB, HBHB/BHBH, COMPRESSION) are handled by their own primitive effects.
+    const active = patterns.filter(p => p.enabled && p.type !== 'FVG' && p.type !== 'HBH_BHB' && p.type !== 'HBHB_BHBH' && p.type !== 'COMPRESSION');
+    const map    = patternSeriesMapRef.current;
+    const activeTypes = new Set(active.map(p => p.type));
+
+    for (const [type, entry] of map) {
+      if (!activeTypes.has(type)) {
+        chart.removeSeries(entry.bullSeries);
+        chart.removeSeries(entry.bearSeries);
+        map.delete(type);
+      }
+    }
+
+    const ghost = {
+      color: 'rgba(0,0,0,0)', lineWidth: 0,
+      priceLineVisible: false, lastValueVisible: false,
+      crosshairMarkerVisible: false, title: '',
+    };
+
+    for (const pat of active) {
+      if (!map.has(pat.type)) {
+        map.set(pat.type, {
+          bullSeries: chart.addLineSeries(ghost),
+          bearSeries: chart.addLineSeries(ghost),
+        });
+      }
+
+      const { bullSeries, bearSeries } = map.get(pat.type);
+
+      if (!candles?.length) {
+        bullSeries.setData([]); bullSeries.setMarkers([]);
+        bearSeries.setData([]); bearSeries.setMarkers([]);
+        continue;
+      }
+
+      let detected = [];
+      if (pat.type === 'TWINS_BARS') {
+        detected = calcTwinsBars(candles, {
+          direction: pat.direction ?? 'both',
+          lookback:  pat.lookback  ?? 4,
+          atrPeriod: pat.atrPeriod ?? 7,
+          atrMult:   pat.atrMult   ?? 1.6,
+        });
+      }
+
+      const bulls     = detected.filter(d => d.side === 'bull');
+      const bears     = detected.filter(d => d.side === 'bear');
+      const bullColor = pat.bullColor  ?? '#26A69A';
+      const bearColor = pat.bearColor  ?? '#EF5350';
+      const size      = pat.markerSize ?? 1;
+      const label     = pat.showLabel !== false ? 'TB' : '';
+
+      bullSeries.setData(bulls);
+      bullSeries.setMarkers(bulls.map(({ time }) => ({
+        time, position: 'belowBar', color: bullColor, shape: 'arrowUp', text: label, size,
+      })));
+
+      bearSeries.setData(bears);
+      bearSeries.setMarkers(bears.map(({ time }) => ({
+        time, position: 'aboveBar', color: bearColor, shape: 'arrowDown', text: label, size,
+      })));
+    }
+  }, [candles, patterns]);
+
+  // ── FVG / iFVG zones (rectangles via series primitive) ─────────────────────
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const fvg = patterns.find(p => p.type === 'FVG' && p.enabled);
+
+    if (!fvg || !candles?.length) {
+      if (fvgPrimitiveRef.current) {
+        try { series.detachPrimitive(fvgPrimitiveRef.current); } catch {}
+        fvgPrimitiveRef.current = null;
+      }
+      return;
+    }
+
+    if (!fvgPrimitiveRef.current) {
+      fvgPrimitiveRef.current = createFvgPrimitive();
+      series.attachPrimitive(fvgPrimitiveRef.current);
+    }
+
+    const zones = calcFVG(candles, {
+      direction:     fvg.direction ?? 'both',
+      showMitigated: fvg.showMitigated !== false,
+      showInverse:   fvg.showInverse   !== false,
+      maxLen:        fvg.maxLen ?? 0,
+    });
+
+    fvgPrimitiveRef.current.update(zones, {
+      bullColor: fvg.bullColor ?? '#26A69A',
+      bearColor: fvg.bearColor ?? '#EF5350',
+      opacity:   fvg.opacity   ?? 0.18,
+      showLabel: fvg.showLabel !== false,
+    });
+  }, [candles, patterns]);
+
+  // ── HBH / BHB zones (rectangles via series primitive) ──────────────────────
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const hbh = patterns.find(p => p.type === 'HBH_BHB' && p.enabled);
+
+    if (!hbh || !candles?.length) {
+      if (hbhPrimitiveRef.current) {
+        try { series.detachPrimitive(hbhPrimitiveRef.current); } catch {}
+        hbhPrimitiveRef.current = null;
+      }
+      return;
+    }
+
+    if (!hbhPrimitiveRef.current) {
+      hbhPrimitiveRef.current = createHbhPrimitive();
+      series.attachPrimitive(hbhPrimitiveRef.current);
+    }
+
+    const zones = calcHBHBHB(candles, {
+      direction: hbh.direction ?? 'both',
+      engMult:   hbh.engMult   ?? 1.5,
+      extLen:    hbh.extLen    ?? 20,
+    });
+
+    hbhPrimitiveRef.current.update(zones, {
+      bullColor: hbh.bullColor ?? '#26A69A',
+      bearColor: hbh.bearColor ?? '#EF5350',
+      opacity:   hbh.opacity   ?? 0.18,
+      showMid:   hbh.showMid   !== false,
+      showLabel: hbh.showLabel !== false,
+    });
+  }, [candles, patterns]);
+
+  // ── HBHB / BHBH zones — only rendered in 'grouped' chart mode ──────────────
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const hbhb = patterns.find(p => p.type === 'HBHB_BHBH' && p.enabled);
+
+    if (!hbhb || !candles?.length || chartMode !== 'grouped') {
+      if (hbhbPrimitiveRef.current) {
+        try { series.detachPrimitive(hbhbPrimitiveRef.current); } catch {}
+        hbhbPrimitiveRef.current = null;
+      }
+      return;
+    }
+
+    if (!hbhbPrimitiveRef.current) {
+      hbhbPrimitiveRef.current = createHbhbPrimitive();
+      series.attachPrimitive(hbhbPrimitiveRef.current);
+    }
+
+    const zones = calcHBHB(candles, {
+      direction: hbhb.direction ?? 'both',
+      bodyMult:  hbhb.bodyMult  ?? 1.5,
+      extLen:    hbhb.extLen    ?? 20,
+    });
+
+    hbhbPrimitiveRef.current.update(zones, {
+      bullColor: hbhb.bullColor ?? '#26A69A',
+      bearColor: hbhb.bearColor ?? '#EF5350',
+      opacity:   hbhb.opacity   ?? 0.18,
+      showLabel: hbhb.showLabel !== false,
+    });
+  }, [candles, patterns, chartMode]);
+
+  // ── Compression / Squeeze zones (rectangles + breakout arrow via primitive) ─
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const sqz = patterns.find(p => p.type === 'COMPRESSION' && p.enabled);
+
+    if (!sqz || !candles?.length) {
+      if (compressionPrimitiveRef.current) {
+        try { series.detachPrimitive(compressionPrimitiveRef.current); } catch {}
+        compressionPrimitiveRef.current = null;
+      }
+      return;
+    }
+
+    if (!compressionPrimitiveRef.current) {
+      compressionPrimitiveRef.current = createCompressionPrimitive();
+      series.attachPrimitive(compressionPrimitiveRef.current);
+    }
+
+    const zones = calcCompression(candles, {
+      mode:          sqz.mode          ?? 'atr',
+      // ATR-flat method
+      atrPeriod:     sqz.atrPeriod     ?? 14,
+      flatTol:       sqz.flatTol       ?? 0.12,
+      breakMult:     sqz.breakMult     ?? 1.8,
+      // TTM Squeeze method
+      length:        sqz.length        ?? 20,
+      bbMult:        sqz.bbMult        ?? 2,
+      kcMult:        sqz.kcMult         ?? 1.5,
+      // shared
+      minLength:     sqz.minLength     ?? 6,
+      extendToBreak: sqz.extendToBreak !== false,
+    });
+
+    compressionPrimitiveRef.current.update(zones, {
+      upColor:      sqz.upColor      ?? '#26A69A',
+      downColor:    sqz.downColor    ?? '#EF5350',
+      neutralColor: sqz.neutralColor ?? '#64748B',
+      opacity:      sqz.opacity      ?? 0.18,
+      showLabel:    sqz.showLabel    !== false,
+      showArrow:    sqz.showArrow    !== false,
+    });
+  }, [candles, patterns]);
+
   // ── Shared style for the drag-handle dots ─────────────────────────────────
   const dotStyle = { width: 3, height: 3, borderRadius: '50%', background: '#4A5568' };
 
@@ -468,6 +798,44 @@ export default function TradingChart({
       >
         {/* LWC chart canvas (transparent background — mainWrapRef background shows through) */}
         <div ref={mainRef} style={{ position: 'absolute', inset: 0 }} />
+
+        {/* Bouton capture d'écran → presse-papier */}
+        <button
+          onClick={takeScreenshot}
+          title="Capturer le graphe (copié dans le presse-papier)"
+          aria-label="Capturer le graphe"
+          style={{
+            position: 'absolute', top: 10, right: 14, zIndex: 11,
+            display: 'flex', alignItems: 'center', gap: 6,
+            height: 30, padding: shotState ? '0 11px' : '0 9px',
+            borderRadius: 999,
+            border: `1px solid ${shotState === 'error' ? 'rgba(239,83,80,0.5)' : 'rgba(167,139,250,0.35)'}`,
+            background: shotState === 'copied'
+              ? 'rgba(38,166,154,0.16)'
+              : shotState === 'error'
+                ? 'rgba(239,83,80,0.14)'
+                : 'rgba(13,18,32,0.72)',
+            color: shotState === 'copied' ? '#34D399' : shotState === 'error' ? '#EF5350' : '#C4B5FD',
+            cursor: 'pointer',
+            fontSize: 11, fontWeight: 700, fontFamily: 'Inter, system-ui, sans-serif',
+            letterSpacing: '0.03em',
+            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
+            transition: 'background 150ms, color 150ms, border-color 150ms',
+          }}
+        >
+          {shotState === 'copied' ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+          )}
+          {shotState === 'copied' ? 'Copié' : shotState === 'error' ? 'Échec' : 'Capture'}
+        </button>
 
         {/* RSI area overlay: darkens + suppresses grid lines via backdrop-filter.
             Placed ABOVE canvas (z-index 1) with pointer-events off.
@@ -530,6 +898,17 @@ export default function TradingChart({
             onDrawingSelect={onDrawingSelect}
             candles={candles}
             onRedrawTrigger={registerDrawingRedraw}
+          />
+        )}
+
+        {tradeSetupActive && tradeSetupEntry != null && (
+          <TradeSetup
+            chartRef={chartRef}
+            seriesRef={candleSeriesRef}
+            containerRef={mainWrapRef}
+            entryPrice={tradeSetupEntry}
+            onConfirm={onTradeSetupConfirm}
+            onCancel={onTradeSetupCancel}
           />
         )}
       </div>

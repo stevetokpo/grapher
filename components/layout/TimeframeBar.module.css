@@ -136,6 +136,56 @@
   line-height: 1;
 }
 
+/* ── Patterns button ──────────────────────────────────────────── */
+.patBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font);
+  background: transparent;
+  color: var(--text-dim);
+  margin-right: 6px;
+  flex-shrink: 0;
+  transition: color var(--ease), background var(--ease), border-color var(--ease), box-shadow var(--ease);
+  white-space: nowrap;
+}
+.patBtn:hover {
+  color: #A78BFA;
+  background: rgba(167, 139, 250, 0.06);
+  border-color: rgba(167, 139, 250, 0.35);
+}
+.patBtnActive {
+  color: #A78BFA;
+  background: rgba(167, 139, 250, 0.08);
+  border-color: rgba(167, 139, 250, 0.40);
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.12);
+}
+.patBtnActive:hover {
+  box-shadow: 0 0 14px rgba(167, 139, 250, 0.22);
+}
+
+.patCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: rgba(167, 139, 250, 0.20);
+  color: #A78BFA;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
 /* ── Chart mode toggle ────────────────────────────────────────── */
 .viewToggle {
   display: flex;

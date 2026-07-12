@@ -1,0 +1,188 @@
+.shell {
+  background:
+    radial-gradient(ellipse 55% 40% at 20% 0%,  rgba(244, 114, 182, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 80% 100%, rgba(96,  165, 250, 0.03) 0%, transparent 70%),
+    var(--bg);
+  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Config bar ──────────────────────────────────────────────────── */
+.configBar {
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(10, 13, 21, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  flex-shrink: 0;
+  min-height: 40px;
+}
+
+.intervalLabel {
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 0.11em;
+  margin-right: 6px;
+  font-weight: 600;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+/* ── TF buttons ──────────────────────────────────────────────────── */
+.tfBtn {
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--text-dim);
+  transition: color var(--ease), background var(--ease), border-color var(--ease);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.tfBtn:hover {
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.05);
+  border-color: var(--border);
+}
+.tfBtnActive {
+  font-weight: 700;
+  background: rgba(244, 114, 182, 0.12);
+  border-color: rgba(244, 114, 182, 0.38);
+  color: #F472B6;
+  box-shadow: 0 0 8px rgba(244, 114, 182, 0.14);
+}
+
+/* ── Separator ───────────────────────────────────────────────────── */
+.sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 10px;
+  flex-shrink: 0;
+}
+
+.spacer { flex: 1; }
+
+/* ── Config group (label + input) ────────────────────────────────── */
+.configGroup {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.configLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-ghost);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.numInput {
+  width: 52px;
+  background: rgba(9, 12, 22, 0.70);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 3px 8px;
+  outline: none;
+  text-align: center;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.numInput:hover { border-color: var(--border-2); }
+.numInput:focus {
+  border-color: rgba(244, 114, 182, 0.50);
+  box-shadow: 0 0 0 2px rgba(244, 114, 182, 0.10);
+}
+.numInput::-webkit-inner-spin-button,
+.numInput::-webkit-outer-spin-button { opacity: 0; }
+
+/* ── RSI live value badge ─────────────────────────────────────────── */
+.rsiBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  transition: color var(--ease), background var(--ease), border-color var(--ease);
+}
+.rsiBadgeNeutral {
+  color: #F472B6;
+  background: rgba(244, 114, 182, 0.08);
+  border: 1px solid rgba(244, 114, 182, 0.22);
+}
+.rsiBadgeOb {
+  color: var(--bear);
+  background: var(--bear-bg);
+  border: 1px solid var(--bear-ring);
+}
+.rsiBadgeOs {
+  color: var(--bull);
+  background: var(--bull-bg);
+  border: 1px solid var(--bull-ring);
+}
+
+/* ── Color swatches ──────────────────────────────────────────────── */
+.swatches {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  background: var(--sw);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
+  transition: transform var(--ease), box-shadow var(--ease), border-color var(--ease);
+  flex-shrink: 0;
+}
+.swatch:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 6px var(--sw);
+}
+.swatchActive {
+  border-color: rgba(255,255,255,0.75);
+  transform: scale(1.1);
+  box-shadow: 0 0 8px var(--sw);
+}
+
+/* ── Chart area ──────────────────────────────────────────────────── */
+.chartArea {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.chartEmpty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-ghost);
+}

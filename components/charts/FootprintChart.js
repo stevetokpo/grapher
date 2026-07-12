@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { fmtTimeHM } from '../../lib/format';
 
 // ── Layout constants ───────────────────────────────────────────────────────
 const BAR_W_DEFAULT      = 130;
@@ -30,11 +31,6 @@ const C = {
 const FONT    = '10px Inter, system-ui, sans-serif';
 const FONT_SM = '9px Inter, system-ui, sans-serif';
 const FONT_XS = '8px Inter, system-ui, sans-serif';
-
-function fmtTime(epoch) {
-  const d = new Date(epoch * 1000);
-  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-}
 
 function fmtPx(n) {
   if (n == null) return '';
@@ -297,7 +293,7 @@ export default function FootprintChart({
         // Time label
         ctx.fillStyle = C.dim;
         ctx.textAlign = 'left';
-        ctx.fillText(fmtTime(bar.time), bx + 4, hMid);
+        ctx.fillText(fmtTimeHM(bar.time), bx + 4, hMid);
 
         // Cumulative delta
         ctx.fillStyle = bd > 0 ? C.bull : bd < 0 ? C.bear : C.ghost;
@@ -409,7 +405,7 @@ export default function FootprintChart({
     visible.forEach((bar, i) => {
       const bx = startIdx * barW + i * barW - sx;
       if (bx + barW / 2 < 0 || bx + barW / 2 > drawW) return;
-      ctx.fillText(fmtTime(bar.time), bx + barW / 2, drawH + TIME_H / 2);
+      ctx.fillText(fmtTimeHM(bar.time), bx + barW / 2, drawH + TIME_H / 2);
     });
 
     ctx.restore();

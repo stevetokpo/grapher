@@ -51,9 +51,13 @@ export function useFootprint(symbolId, tickSize = 5) {
   const [error,       setError]       = useState(null);
   const [hasMore,     setHasMore]     = useState(false);
   const cursorRef     = useRef(null); // epoch of the oldest bar loaded
+  // Bumped on every symbol/tickSize change — in-flight loadMore responses from
+  // a previous generation are discarded (they belong to another dataset).
+  const genRef        = useRef(0);
 
   // Reset + initial fetch when symbolId or tickSize changes
   useEffect(() => {
+    genRef.current += 1;
     if (!symbolId) {
       setBars([]); setHasMore(false); cursorRef.current = null;
       return;
@@ -63,6 +67,7 @@ export function useFootprint(symbolId, tickSize = 5) {
     setError(null);
     setBars([]);
     setHasMore(false);
+    setLoadingMore(false);
     cursorRef.current = null;
 
     const ctrl = new AbortController();
@@ -89,12 +94,14 @@ export function useFootprint(symbolId, tickSize = 5) {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !symbolId || cursorRef.current === null) return;
 
+    const gen = genRef.current;
     setLoadingMore(true);
     try {
       const res  = await fetch(
         `/api/footprint?symbolId=${symbolId}&tickSize=${tickSize}&limit=${PAGE}&to=${cursorRef.current}`,
       );
       const data = await res.json();
+      if (gen !== genRef.current) return; // symbol/tickSize changed mid-flight — discard
       if (data.error) throw new Error(data.error);
 
       const older = groupRows(data.rows ?? []);
@@ -106,7 +113,8 @@ export function useFootprint(symbolId, tickSize = 5) {
     } catch (e) {
       console.error('[footprint] loadMore', e);
     } finally {
-      setLoadingMore(false);
+      // A newer generation owns this flag now — don't clobber its state.
+      if (gen === genRef.current) setLoadingMore(false);
     }
   }, [symbolId, tickSize, loadingMore, hasMore]);
 

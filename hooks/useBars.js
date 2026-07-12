@@ -14,6 +14,9 @@ export function useBars(symbolId, tfId) {
   const symbolIdRef = useRef(null);
   const tfIdRef     = useRef('1h');
   const fetchingRef = useRef(false);
+  // Bumped on every symbol/tf change — in-flight loadMore responses from a
+  // previous generation are discarded (they would prepend bars of another tf).
+  const genRef      = useRef(0);
 
   useEffect(() => { allBarsRef.current  = allBars;  }, [allBars]);
   useEffect(() => { hasMoreRef.current  = hasMore;  }, [hasMore]);
@@ -22,6 +25,7 @@ export function useBars(symbolId, tfId) {
 
   // Reset + initial fetch when symbol or timeframe changes
   useEffect(() => {
+    genRef.current += 1;
     if (!symbolId) return;
 
     setAllBars([]);
@@ -30,6 +34,7 @@ export function useBars(symbolId, tfId) {
     hasMoreRef.current  = true;
     fetchingRef.current = false;
     setLoading(true);
+    setLoadingMore(false);
 
     const ctrl = new AbortController();
     fetch(`/api/bars?symbolId=${symbolId}&tf=${tfId}&limit=${BARS_PER_PAGE}`, { signal: ctrl.signal })
@@ -56,6 +61,7 @@ export function useBars(symbolId, tfId) {
     const bars = allBarsRef.current;
     if (!bars.length) return;
 
+    const gen = genRef.current;
     fetchingRef.current = true;
     setLoadingMore(true);
 
@@ -64,6 +70,7 @@ export function useBars(symbolId, tfId) {
 
     try {
       const data  = await fetch(url).then(r => r.json());
+      if (gen !== genRef.current) return; // symbol/tf changed mid-flight — discard
       const older = Array.isArray(data) ? data : [];
 
       if (older.length === 0) {
@@ -79,8 +86,11 @@ export function useBars(symbolId, tfId) {
     } catch (e) {
       console.error('loadMore', e);
     } finally {
-      fetchingRef.current = false;
-      setLoadingMore(false);
+      // A newer generation owns these flags now — don't clobber its state.
+      if (gen === genRef.current) {
+        fetchingRef.current = false;
+        setLoadingMore(false);
+      }
     }
   }, []); // empty deps intentional — all reads go through refs
 

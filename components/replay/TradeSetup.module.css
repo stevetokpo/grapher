@@ -1,0 +1,250 @@
+/* ── Draggable horizontal line ──────────────────────────────────────── */
+.line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 20px;
+  transform: translateY(-50%);
+  cursor: ns-resize;
+  user-select: none;
+}
+
+.lineBody {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  opacity: 0.82;
+}
+
+/* Label attached to the left of the line (clears DrawingToolbar ~44px) */
+.lineTag {
+  position: absolute;
+  left: 55px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10.5px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 7px;
+  border-radius: 3px;
+  background: rgba(9, 12, 22, 0.90);
+  border: 1px solid;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Small grab-handle indicator centered on the line */
+.handle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 26px;
+  height: 10px;
+  border: 1.5px solid;
+  border-radius: 2px;
+  background: rgba(9, 12, 22, 0.90);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.handle::after {
+  content: '⠿';
+  font-size: 8px;
+  color: currentColor;
+  opacity: 0.65;
+  line-height: 1;
+}
+
+/* ── Confirmation panel ─────────────────────────────────────────────── */
+.panel {
+  position: absolute;
+  top: 14px;
+  right: 74px;       /* leaves space for the right price axis */
+  width: 206px;
+  background: rgba(9, 12, 22, 0.95);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 8px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255,255,255,0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Direction toggle ───────────────────────────────────────────────── */
+.dirToggle {
+  display: flex;
+  gap: 4px;
+}
+
+.dirBtn {
+  flex: 1;
+  padding: 7px 0;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(13, 18, 32, 0.55);
+  color: rgba(148, 163, 184, 0.65);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: var(--font, Inter, system-ui, sans-serif);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.dirBtn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(226, 232, 240, 0.90);
+}
+
+.buyActive {
+  background: rgba(38, 166, 154, 0.16) !important;
+  border-color: rgba(38, 166, 154, 0.50) !important;
+  color: #26A69A !important;
+  box-shadow: 0 0 12px rgba(38, 166, 154, 0.15);
+}
+
+.sellActive {
+  background: rgba(239, 83, 80, 0.16) !important;
+  border-color: rgba(239, 83, 80, 0.50) !important;
+  color: #EF5350 !important;
+  box-shadow: 0 0 12px rgba(239, 83, 80, 0.15);
+}
+
+/* ── Level rows ────────────────────────────────────────────────────── */
+.levelRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ll {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: rgba(100, 116, 139, 1);
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lv {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 1);
+}
+
+.mono {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.pips {
+  font-size: 9.5px;
+  font-style: normal;
+  opacity: 0.65;
+}
+
+/* ── R:R row ────────────────────────────────────────────────────────── */
+.rrRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  margin-top: 1px;
+}
+
+.rrLabel {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: rgba(100, 116, 139, 1);
+  text-transform: uppercase;
+}
+
+.rrValue {
+  font-size: 14px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.90);
+}
+
+/* ── Error ───────────────────────────────────────────────────────────── */
+.error {
+  margin: 0;
+  font-size: 10px;
+  color: #EF5350;
+  line-height: 1.5;
+  background: rgba(239, 83, 80, 0.08);
+  border: 1px solid rgba(239, 83, 80, 0.25);
+  border-radius: 5px;
+  padding: 5px 8px;
+}
+
+/* ── Action buttons ─────────────────────────────────────────────────── */
+.actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.cancelBtn {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: transparent;
+  color: rgba(148, 163, 184, 0.70);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font, Inter, system-ui, sans-serif);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.cancelBtn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(226, 232, 240, 0.90);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.confirmBtn {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 7px;
+  border: none;
+  background: linear-gradient(135deg, #26A69A, #2bc4b7);
+  color: #071219;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: var(--font, Inter, system-ui, sans-serif);
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  box-shadow: 0 0 14px rgba(38, 166, 154, 0.28);
+  transition: box-shadow 140ms ease, transform 100ms ease;
+}
+
+.confirmBtn:hover {
+  box-shadow: 0 0 24px rgba(38, 166, 154, 0.50);
+  transform: translateY(-1px);
+}
+
+.confirmBtn:active {
+  transform: scale(0.97);
+  box-shadow: 0 0 10px rgba(38, 166, 154, 0.22);
+}

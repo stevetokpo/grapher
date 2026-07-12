@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/router';
+import { groupCandles } from '../lib/candleData';
 import dynamic from 'next/dynamic';
 import { useSymbols }     from '../hooks/useSymbols';
 import { useBars }        from '../hooks/useBars';
@@ -11,8 +13,10 @@ import StatsBar         from '../components/layout/StatsBar';
 import TimeframeBar     from '../components/layout/TimeframeBar';
 import styles           from '../styles/app.module.css';
 import { DEFAULT_SETTINGS } from '../components/SettingsPanel';
+import { DEFAULT_PATTERNS, PATTERN_TYPES } from '../components/PatternPanel';
 
-const DrawingToolbar = dynamic(() => import('../components/charts/DrawingToolbar'), { ssr: false });
+const DrawingToolbar  = dynamic(() => import('../components/charts/DrawingToolbar'),  { ssr: false });
+const DrawingStyleBar = dynamic(() => import('../components/charts/DrawingStyleBar'), { ssr: false });
 
 const TradingChart   = dynamic(() => import('../components/charts/TradingChart'),   { ssr: false });
 const FootprintChart = dynamic(() => import('../components/charts/FootprintChart'), { ssr: false });
@@ -20,18 +24,26 @@ const ImportPanel    = dynamic(() => import('../components/ImportPanel'),       
 const ManagePanel    = dynamic(() => import('../components/ManagePanel'),             { ssr: false });
 const IndicatorPanel = dynamic(() => import('../components/IndicatorPanel'),          { ssr: false });
 const SettingsPanel  = dynamic(() => import('../components/SettingsPanel'),           { ssr: false });
+const ReplayModal    = dynamic(() => import('../components/replay/ReplayModal'),      { ssr: false });
+const PatternPanel   = dynamic(() => import('../components/PatternPanel'),             { ssr: false });
+const ChatPanel      = dynamic(() => import('../components/chat/ChatPanel'),           { ssr: false });
 
 export default function Home() {
+  const router = useRouter();
   const { symbols, symbolId, setSymbolId, loadSymbols, currentSym } = useSymbols();
   const [tfId,      setTfId]      = useLocalStorage('grapher.tfId',      '1h');
   const [chartMode, setChartMode] = useLocalStorage('grapher.chartMode', 'candle');
   const [tickSize,  setTickSize]  = useState(5);
   const [indicators,      setIndicators]      = useLocalStorage('grapher.indicators', []);
+  const [patterns,        setPatterns]        = useLocalStorage('grapher.patterns',   DEFAULT_PATTERNS);
   const [settings,        setSettings]        = useLocalStorage('grapher.settings',   DEFAULT_SETTINGS);
   const [showImport,      setShowImport]      = useState(false);
   const [showManage,      setShowManage]      = useState(false);
   const [showIndicators,  setShowIndicators]  = useState(false);
+  const [showPatterns,    setShowPatterns]    = useState(false);
   const [showSettings,    setShowSettings]    = useState(false);
+  const [showReplay,      setShowReplay]      = useState(false);
+  const [showChat,        setShowChat]        = useState(false);
 
   const {
     drawings, activeTool, setActiveTool,
@@ -43,6 +55,22 @@ export default function Home() {
 
   const hasTicks       = (currentSym?.tick_count ?? 0) > 0;
   const inFootprint    = chartMode === 'footprint' && hasTicks;
+
+  // In "grouped" mode, merge consecutive same-direction candles into trend bars.
+  const displayBars = useMemo(
+    () => (chartMode === 'grouped' ? groupCandles(allBars) : allBars),
+    [chartMode, allBars],
+  );
+
+  // Merge stored patterns with PATTERN_TYPES so newly-added patterns render even
+  // when the user's localStorage predates them. Stored values win over defaults.
+  const effectivePatterns = useMemo(
+    () => PATTERN_TYPES.map(pt => {
+      const stored = patterns.find(p => p.type === pt.type);
+      return stored ? { ...pt, ...stored } : { ...pt, enabled: true };
+    }),
+    [patterns],
+  );
 
   const cvdData = useCVD(inFootprint ? null : symbolId, tfId);
 
@@ -99,6 +127,9 @@ export default function Home() {
         onImport={() => setShowImport(true)}
         onManage={() => setShowManage(true)}
         onSettings={() => setShowSettings(true)}
+        onReplay={() => setShowReplay(true)}
+        onRsi={() => router.push('/rsi')}
+        onChat={() => setShowChat(true)}
       />
       <StatsBar allBars={allBars} currentSym={currentSym} loading={loading} />
       <TimeframeBar
@@ -110,6 +141,8 @@ export default function Home() {
         tickSize={tickSize}  onTickSizeChange={setTickSize}
         indicatorCount={indicators.length}
         onIndicators={() => setShowIndicators(true)}
+        patternCount={effectivePatterns.filter(p => p.enabled).length}
+        onPatterns={() => setShowPatterns(true)}
       />
 
       {/* ── Chart area ───────────────────────────────────────────── */}
@@ -118,6 +151,11 @@ export default function Home() {
           activeTool={activeTool}
           onToolChange={setActiveTool}
           onClearAll={clearAll}
+        />
+        <DrawingStyleBar
+          drawing={activeTool === null ? (drawings.find(d => d.id === selectedId) ?? null) : null}
+          onUpdate={updateDrawing}
+          onRemove={removeDrawing}
         />
         {inFootprint ? (
           fpLoading ? (
@@ -137,13 +175,15 @@ export default function Home() {
         ) : (
           allBars.length > 0 ? (
             <TradingChart
-                candles={allBars}
+                candles={displayBars}
                 onLoadMore={onLoadMore}
                 indicators={indicators}
+                patterns={effectivePatterns}
+                chartMode={chartMode}
                 bullColor={settings?.bullColor ?? '#26A69A'}
                 bearColor={settings?.bearColor ?? '#EF5350'}
                 showVolume={settings?.showVolume ?? true}
-                cvdData={cvdData}
+                cvdData={chartMode === 'candle' ? cvdData : null}
                 drawings={drawings}
                 activeTool={activeTool}
                 selectedId={selectedId}
@@ -164,7 +204,10 @@ export default function Home() {
       {showImport      && <ImportPanel    onClose={() => setShowImport(false)}     onImported={onImported} />}
       {showManage      && <ManagePanel    onClose={() => setShowManage(false)}     onDeleted={onDeleted} />}
       {showIndicators  && <IndicatorPanel onClose={() => setShowIndicators(false)} indicators={indicators} onChange={setIndicators} />}
+      {showPatterns    && <PatternPanel   onClose={() => setShowPatterns(false)}   patterns={patterns}     onChange={setPatterns} />}
       {showSettings    && <SettingsPanel  onClose={() => setShowSettings(false)}   settings={settings}     onChange={setSettings} />}
+      {showReplay      && <ReplayModal    onClose={() => setShowReplay(false)} />}
+      {showChat        && <ChatPanel      onClose={() => setShowChat(false)} />}
     </div>
   );
 }

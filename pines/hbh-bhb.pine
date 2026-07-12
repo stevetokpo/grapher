@@ -1,0 +1,98 @@
+//@version=5
+// ===========================================================================
+//  PATTERN HBH / BHB — zone de la bougie du milieu
+//  3 bougies : la bougie du MILIEU est petite, de sens OPPOSÉ, coincée entre
+//  deux grandes bougies « englobantes », et la 3e CLÔTURE INTÉGRALEMENT de
+//  l'autre côté du milieu.
+//    • HBH : Haussier · Baissier · Haussier  → la 3e clôture AU-DESSUS du
+//            haut de la bougie du milieu.
+//    • BHB : Baissier · Haussier · Baissier  → la 3e clôture SOUS le bas de
+//            la bougie du milieu.
+//  On trace une zone encadrant la hauteur (haut–bas) du milieu : teal (HBH) / rouge (BHB).
+// ===========================================================================
+indicator("Pattern HBH / BHB", "HBH/BHB", overlay=true, max_boxes_count=500, max_lines_count=500)
+
+// ════════════════════ RÉGLAGES ════════════════════
+useConfirm  = input.bool(true, "Détecter sur bougie clôturée (anti-repaint)")
+showHBH     = input.bool(true, "Détecter HBH (haussier-baissier-haussier)")
+showBHB     = input.bool(true, "Détecter BHB (baissier-haussier-baissier)")
+engRatio    = input.float(1.5, "Corps 1e & 3e ≥ × corps du milieu", minval=1.0, step=0.1, tooltip="« Englobante » : les 1e et 3e bougies doivent avoir un corps au moins N fois plus grand que la bougie du milieu.")
+useATR      = input.bool(false, "Filtre taille mini (ATR) sur 1e & 3e", tooltip="Exige en plus que les 1e et 3e bougies aient un corps assez grand en valeur absolue (× ATR).")
+atrLen      = input.int(14, "Période ATR", minval=1)
+minOuterATR = input.float(0.5, "Corps 1e & 3e ≥ × ATR", minval=0.0, step=0.1)
+useBB       = input.bool(false, "Filtre Bollinger", tooltip="HBH affichés seulement si la bougie du milieu (2e) ouvre ET clôture SOUS la borne supérieure ; BHB seulement si elle ouvre ET clôture AU-DESSUS de la borne inférieure.")
+bbLen       = input.int(50, "BB — période", minval=1)
+bbMult      = input.float(0.5, "BB — écart-type", minval=0.001, step=0.1)
+showBB      = input.bool(true, "Afficher les bandes de Bollinger")
+extLen      = input.int(20, "Longueur de la zone (barres)", minval=1)
+bordW       = input.int(1, "Épaisseur bordure", minval=0)
+showMid     = input.bool(true, "Afficher la ligne médiane (H/2)")
+lineW       = input.int(1, "Épaisseur ligne médiane", minval=1)
+hbhFill     = input.color(color.new(color.teal, 80), "HBH — remplissage")
+hbhBd       = input.color(color.new(color.teal, 0),  "HBH — bordure / ligne")
+bhbFill     = input.color(color.new(color.red, 80),  "BHB — remplissage")
+bhbBd       = input.color(color.new(color.red, 0),   "BHB — bordure / ligne")
+
+atr       = ta.atr(atrLen)
+bbBasis   = ta.sma(close, bbLen)
+bbDev     = bbMult * ta.stdev(close, bbLen)
+bbUpper   = bbBasis + bbDev
+bbLower   = bbBasis - bbDev
+canDetect = useConfirm ? barstate.isconfirmed : true
+
+// ════════════════════ LES 3 BOUGIES ════════════════════
+// Offsets : [2] = 1e bougie · [1] = bougie du milieu · [0] = 3e bougie (courante)
+bull2 = close[2] > open[2]
+bear2 = close[2] < open[2]
+bull1 = close[1] > open[1]
+bear1 = close[1] < open[1]
+bull0 = close    > open
+bear0 = close    < open
+
+// Corps (top / bottom / taille) de chaque bougie
+bt2 = math.max(open[2], close[2])
+bb2 = math.min(open[2], close[2])
+bd2 = math.abs(close[2] - open[2])
+bt1 = math.max(open[1], close[1])
+bb1 = math.min(open[1], close[1])
+bd1 = math.abs(close[1] - open[1])
+bt0 = math.max(open, close)
+bb0 = math.min(open, close)
+bd0 = math.abs(close - open)
+
+// ════════════════════ CONDITIONS COMMUNES ════════════════════
+bigOuter    = bd2 >= engRatio * bd1 and bd0 >= engRatio * bd1            // 1e & 3e grandes vs milieu
+midSandwich = bb1 >= math.min(bb2, bb0) and bt1 <= math.max(bt2, bt0)   // milieu coincé entre les corps des 2 autres
+sizeOuter   = (not useATR) or (bd2 >= minOuterATR * atr and bd0 >= minOuterATR * atr)
+// Filtre Bollinger : la bougie du milieu (2e) doit rester du bon côté de la bande.
+bbOkHBH     = (not useBB) or (open[1] < bbUpper[1] and close[1] < bbUpper[1])   // milieu sous la borne sup.
+bbOkBHB     = (not useBB) or (open[1] > bbLower[1] and close[1] > bbLower[1])   // milieu au-dessus de la borne inf.
+
+// ════════════════════ DÉTECTION DU PATTERN ════════════════════
+// HBH : la 3e (haussière) clôture au-dessus du HAUT du milieu.
+hbh = bull2 and bear1 and bull0 and bigOuter and midSandwich and sizeOuter and bbOkHBH and open <= high[1] and close > high[1]
+// BHB : la 3e (baissière) clôture sous le BAS du milieu.
+bhb = bear2 and bull1 and bear0 and bigOuter and midSandwich and sizeOuter and bbOkBHB and open >= low[1]  and close < low[1]
+
+hbhSig = canDetect and showHBH and hbh
+bhbSig = canDetect and showBHB and bhb
+
+// ════════════════════ ZONE VIOLETTE (hauteur du milieu) ════════════════════
+if hbhSig or bhbSig
+    fCol  = hbhSig ? hbhFill : bhbFill
+    bCol  = hbhSig ? hbhBd   : bhbBd
+    left  = bar_index - 1                      // la bougie du milieu
+    right = left + extLen
+    mid   = (high[1] + low[1]) / 2             // ligne médiane (H/2) de la bougie du milieu
+    box.new(left, high[1], right, low[1], bgcolor=fCol, border_color=bCol, border_width=bordW)
+    if showMid
+        line.new(left, mid, right, mid, color=bCol, width=lineW)
+
+// ════════════════════ BANDES DE BOLLINGER (affichage) ════════════════════
+plot(showBB ? bbUpper : na, "BB sup",  color=color.new(color.gray, 0))
+plot(showBB ? bbBasis : na, "BB base", color=color.new(color.gray, 60))
+plot(showBB ? bbLower : na, "BB inf",  color=color.new(color.gray, 0))
+
+// ════════════════════ ALERTES ════════════════════
+alertcondition(hbhSig, "Pattern HBH", "Pattern HBH (haussier-baissier-haussier) détecté")
+alertcondition(bhbSig, "Pattern BHB", "Pattern BHB (baissier-haussier-baissier) détecté")

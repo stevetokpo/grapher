@@ -2,9 +2,12 @@ import { fmtCount } from '../../lib/format';
 import styles from './TimeframeBar.module.css';
 
 const TIMEFRAMES = [
-  { id: '1m', label: '1m' }, { id: '5m',  label: '5m'  },
-  { id: '15m', label: '15m' }, { id: '1h', label: '1H'  },
-  { id: '4h', label: '4H' }, { id: '1D',  label: '1D'  },
+  { id: '1m',  label: '1m'  }, { id: '3m',  label: '3m'  },
+  { id: '5m',  label: '5m'  }, { id: '10m', label: '10m' },
+  { id: '15m', label: '15m' }, { id: '20m', label: '20m' },
+  { id: '30m', label: '30m' }, { id: '1h',  label: '1H'  },
+  { id: '2h',  label: '2H'  }, { id: '4h',  label: '4H'  },
+  { id: '1D',  label: '1D'  },
 ];
 
 const TICK_SIZES = [0.5, 1, 2, 5, 10, 20, 50];
@@ -19,6 +22,17 @@ function CandleIcon() {
       <line x1="3.5" y1="10" x2="3.5" y2="12" stroke="currentColor" strokeWidth="1"/>
       <line x1="8.5" y1="1" x2="8.5" y2="2"  stroke="currentColor" strokeWidth="1"/>
       <line x1="8.5" y1="11" x2="8.5" y2="12" stroke="currentColor" strokeWidth="1"/>
+    </svg>
+  );
+}
+
+function GroupedIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+      <rect x="2"   y="2" width="3.5" height="9" rx="0.5" fill="currentColor" opacity="0.9"/>
+      <rect x="7.5" y="4" width="3.5" height="6" rx="0.5" fill="currentColor" opacity="0.5"/>
+      <line x1="3.75" y1="0.5" x2="3.75" y2="2"  stroke="currentColor" strokeWidth="1" opacity="0.9"/>
+      <line x1="3.75" y1="11"  x2="3.75" y2="12.5" stroke="currentColor" strokeWidth="1" opacity="0.9"/>
     </svg>
   );
 }
@@ -44,6 +58,22 @@ function IndicatorsIcon() {
   );
 }
 
+function PatternsIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <rect x="1" y="5" width="3" height="5" rx="0.5" fill="currentColor" opacity="0.5"/>
+      <line x1="2.5" y1="3" x2="2.5" y2="5" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
+      <line x1="2.5" y1="10" x2="2.5" y2="11.5" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
+      <rect x="4.5" y="2.5" width="3" height="7" rx="0.5" fill="currentColor" opacity="0.8"/>
+      <line x1="6" y1="0.5" x2="6" y2="2.5" stroke="currentColor" strokeWidth="1" opacity="0.8"/>
+      <line x1="6" y1="9.5" x2="6" y2="11.5" stroke="currentColor" strokeWidth="1" opacity="0.8"/>
+      <rect x="8" y="4" width="3" height="4" rx="0.5" fill="currentColor"/>
+      <line x1="9.5" y1="2" x2="9.5" y2="4" stroke="currentColor" strokeWidth="1"/>
+      <line x1="9.5" y1="8" x2="9.5" y2="10" stroke="currentColor" strokeWidth="1"/>
+    </svg>
+  );
+}
+
 export default function TimeframeBar({
   tfId, onTfChange,
   loading, loadingMore, hasMore, barCount,
@@ -51,6 +81,7 @@ export default function TimeframeBar({
   hasTicks,
   tickSize, onTickSizeChange,
   indicatorCount, onIndicators,
+  patternCount, onPatterns,
 }) {
   const inFootprint = chartMode === 'footprint';
 
@@ -95,20 +126,34 @@ export default function TimeframeBar({
 
       <div className={styles.spacer} />
 
-      {/* Indicators button — only in candle mode */}
+      {/* Indicators + Patterns buttons — only in candle mode */}
       {!inFootprint && (
-        <button
-          className={`${styles.indBtn}${indicatorCount > 0 ? ` ${styles.indBtnActive}` : ''}`}
-          onClick={onIndicators}
-          aria-label="Indicateurs"
-          title="Indicateurs"
-        >
-          <IndicatorsIcon />
-          Indicateurs
-          {indicatorCount > 0 && (
-            <span className={styles.indCount}>{indicatorCount}</span>
-          )}
-        </button>
+        <>
+          <button
+            className={`${styles.indBtn}${indicatorCount > 0 ? ` ${styles.indBtnActive}` : ''}`}
+            onClick={onIndicators}
+            aria-label="Indicateurs"
+            title="Indicateurs"
+          >
+            <IndicatorsIcon />
+            Indicateurs
+            {indicatorCount > 0 && (
+              <span className={styles.indCount}>{indicatorCount}</span>
+            )}
+          </button>
+          <button
+            className={`${styles.patBtn}${patternCount > 0 ? ` ${styles.patBtnActive}` : ''}`}
+            onClick={onPatterns}
+            aria-label="Patterns"
+            title="Patterns"
+          >
+            <PatternsIcon />
+            Patterns
+            {patternCount > 0 && (
+              <span className={styles.patCount}>{patternCount}</span>
+            )}
+          </button>
+        </>
       )}
 
       {/* Tick size selector — only when in footprint mode */}
@@ -128,29 +173,38 @@ export default function TimeframeBar({
         </div>
       )}
 
-      {/* Chart mode toggle — only for symbols with tick data */}
-      {hasTicks && (
-        <div className={styles.viewToggle} role="group" aria-label="Chart type">
+      {/* Chart mode toggle — Candle/Grouped always available, Footprint needs ticks */}
+      <div className={styles.viewToggle} role="group" aria-label="Chart type">
+        <button
+          className={`${styles.viewBtn}${chartMode === 'candle' ? ` ${styles.viewActive}` : ''}`}
+          onClick={() => onChartModeChange('candle')}
+          aria-pressed={chartMode === 'candle'}
+          title="Candlestick chart"
+        >
+          <CandleIcon />
+          Candle
+        </button>
+        <button
+          className={`${styles.viewBtn}${chartMode === 'grouped' ? ` ${styles.viewActive}` : ''}`}
+          onClick={() => onChartModeChange('grouped')}
+          aria-pressed={chartMode === 'grouped'}
+          title="Grouped trend candles — merges consecutive same-direction bars"
+        >
+          <GroupedIcon />
+          Grouped
+        </button>
+        {hasTicks && (
           <button
-            className={`${styles.viewBtn}${!inFootprint ? ` ${styles.viewActive}` : ''}`}
-            onClick={() => onChartModeChange('candle')}
-            aria-pressed={!inFootprint}
-            title="Candlestick chart"
-          >
-            <CandleIcon />
-            Candle
-          </button>
-          <button
-            className={`${styles.viewBtn}${inFootprint ? ` ${styles.viewActive}` : ''}`}
+            className={`${styles.viewBtn}${chartMode === 'footprint' ? ` ${styles.viewActive}` : ''}`}
             onClick={() => onChartModeChange('footprint')}
-            aria-pressed={inFootprint}
+            aria-pressed={chartMode === 'footprint'}
             title="Footprint order-flow chart"
           >
             <FootprintIcon />
             Footprint
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

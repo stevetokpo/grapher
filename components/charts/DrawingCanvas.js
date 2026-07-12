@@ -10,6 +10,9 @@ import {
   linearRegression,
 } from '../../lib/drawingUtils';
 
+// Position tools are drag-based: pointerdown = entry, pointerup = TP (SL is mirrored)
+const DRAG_TOOLS = new Set(['position_long', 'position_short']);
+
 const HIT    = 7;
 const HANDLE = 5;
 
@@ -255,6 +258,153 @@ function renderDrawing(ctx, d, W, H, toPixel, selected, hovered) {
       ctx.beginPath(); ctx.moveTo(0, b.y); ctx.lineTo(W, b.y); ctx.stroke();
       break;
     }
+
+    // ── Position longue / courte ────────────────────────────────────────
+    case 'position_long':
+    case 'position_short': {
+      if (!pts[0]) break;
+      const entry = pts[0];
+      const tp    = pts[1] ?? entry;
+      const sl    = pts[2] ?? { x: entry.x, y: entry.y + (entry.y - tp.y) };
+
+      const tpClr = '#26A69A', slClr = '#EF5350';
+
+      ctx.save();
+      ctx.globalAlpha = 0.13;
+      ctx.fillStyle = tpClr;
+      ctx.fillRect(0, Math.min(entry.y, tp.y), W, Math.abs(entry.y - tp.y));
+      ctx.fillStyle = slClr;
+      ctx.fillRect(0, Math.min(entry.y, sl.y), W, Math.abs(entry.y - sl.y));
+      ctx.globalAlpha = 1;
+
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 3]);
+      ctx.strokeStyle = stroke;
+      ctx.beginPath(); ctx.moveTo(0, entry.y); ctx.lineTo(W, entry.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = tpClr;
+      ctx.beginPath(); ctx.moveTo(0, tp.y); ctx.lineTo(W, tp.y); ctx.stroke();
+      ctx.strokeStyle = slClr;
+      ctx.beginPath(); ctx.moveTo(0, sl.y); ctx.lineTo(W, sl.y); ctx.stroke();
+
+      const ep   = d.points[0]?.price ?? 0;
+      const tpp  = d.points[1]?.price ?? ep;
+      const slp  = d.points[2]?.price ?? ep;
+      const tpDist = Math.abs(tpp - ep);
+      const slDist = Math.abs(slp - ep);
+      const tpPct  = ep > 0 ? (tpDist / ep * 100).toFixed(2) : '0.00';
+      const slPct  = ep > 0 ? (slDist / ep * 100).toFixed(2) : '0.00';
+      const rr     = slDist > 0 ? (tpDist / slDist).toFixed(1) : '∞';
+
+      ctx.font = 'bold 10px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+
+      if (Math.abs(entry.y - tp.y) > 18) {
+        ctx.fillStyle = tpClr;
+        ctx.fillText(`+${tpPct}%`, W - 6, (entry.y + tp.y) / 2);
+      }
+      if (Math.abs(entry.y - sl.y) > 18) {
+        ctx.fillStyle = slClr;
+        ctx.fillText(`-${slPct}%`, W - 6, (entry.y + sl.y) / 2);
+      }
+      ctx.fillStyle = stroke;
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(
+        `${d.type === 'position_long' ? 'LONG' : 'SHORT'}  R:R ${rr}`,
+        W - 6, entry.y - 3,
+      );
+      ctx.restore();
+      break;
+    }
+
+    // ── Plage de prix ───────────────────────────────────────────────────
+    case 'price_range': {
+      if (!pts[0]) break;
+      const p1 = pts[0], p2 = pts[1] ?? pts[0];
+      const yT = Math.min(p1.y, p2.y), yB = Math.max(p1.y, p2.y);
+
+      ctx.save();
+      ctx.globalAlpha = 0.1; ctx.fillStyle = color;
+      ctx.fillRect(0, yT, W, yB - yT);
+      ctx.globalAlpha = 1;
+
+      ctx.lineWidth = 1; ctx.setLineDash([]);
+      ctx.strokeStyle = stroke;
+      ctx.beginPath(); ctx.moveTo(0, p1.y); ctx.lineTo(W, p1.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, p2.y); ctx.lineTo(W, p2.y); ctx.stroke();
+
+      const pr1 = d.points[0]?.price ?? 0, pr2 = d.points[1]?.price ?? pr1;
+      const diff = Math.abs(pr2 - pr1);
+      const pct  = pr1 > 0 ? (diff / pr1 * 100).toFixed(3) : '0.000';
+      if (yB - yT > 16) {
+        ctx.fillStyle = stroke;
+        ctx.font = 'bold 10px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        ctx.fillText(`${diff.toFixed(5)}  ${pct}%`, W - 6, (p1.y + p2.y) / 2);
+      }
+      ctx.restore();
+      break;
+    }
+
+    // ── Plage de dates ──────────────────────────────────────────────────
+    case 'date_range': {
+      if (!pts[0]) break;
+      const p1 = pts[0], p2 = pts[1] ?? pts[0];
+      const xL = Math.min(p1.x, p2.x), xR = Math.max(p1.x, p2.x);
+
+      ctx.save();
+      ctx.globalAlpha = 0.1; ctx.fillStyle = color;
+      ctx.fillRect(xL, 0, xR - xL, H);
+      ctx.globalAlpha = 1;
+
+      ctx.lineWidth = 1; ctx.setLineDash([]);
+      ctx.strokeStyle = stroke;
+      ctx.beginPath(); ctx.moveTo(p1.x, 0); ctx.lineTo(p1.x, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p2.x, 0); ctx.lineTo(p2.x, H); ctx.stroke();
+
+      const t1 = d.points[0]?.time ?? 0, t2 = d.points[1]?.time ?? t1;
+      if (xR - xL > 30) {
+        ctx.fillStyle = stroke;
+        ctx.font = 'bold 10px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(fmtTimeDiff(t1, t2), (p1.x + p2.x) / 2, 10);
+      }
+      ctx.restore();
+      break;
+    }
+
+    // ── Plage date + prix ───────────────────────────────────────────────
+    case 'datetime_range': {
+      if (!pts[0] || !pts[1]) break;
+      const p1 = pts[0], p2 = pts[1];
+      const xMin = Math.min(p1.x, p2.x), xMax = Math.max(p1.x, p2.x);
+      const yMin = Math.min(p1.y, p2.y), yMax = Math.max(p1.y, p2.y);
+
+      ctx.save();
+      ctx.globalAlpha = 0.08; ctx.fillStyle = color;
+      ctx.fillRect(xMin, yMin, xMax - xMin, yMax - yMin);
+      ctx.globalAlpha = 1;
+
+      ctx.lineWidth = 1; ctx.setLineDash([]); ctx.strokeStyle = stroke;
+      ctx.strokeRect(xMin, yMin, xMax - xMin, yMax - yMin);
+
+      const pr1 = d.points[0]?.price ?? 0, pr2 = d.points[1]?.price ?? pr1;
+      const t1  = d.points[0]?.time  ?? 0, t2  = d.points[1]?.time  ?? t1;
+      const diff = Math.abs(pr2 - pr1);
+      const pct  = pr1 > 0 ? (diff / pr1 * 100).toFixed(2) : '0.00';
+      if (xMax - xMin > 40 && yMax - yMin > 20) {
+        ctx.fillStyle = stroke;
+        ctx.font = '10px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(
+          `${diff.toFixed(5)} (${pct}%)  ${fmtTimeDiff(t1, t2)}`,
+          (p1.x + p2.x) / 2, (p1.y + p2.y) / 2,
+        );
+      }
+      ctx.restore();
+      break;
+    }
   }
 
   // Selection handles (anchor points)
@@ -403,6 +553,47 @@ function renderDraft(ctx, draft, W, H, toPixel) {
       ctx.beginPath(); ctx.moveTo(0, a.y); ctx.lineTo(W, a.y); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, b.y); ctx.lineTo(W, b.y); ctx.stroke();
       break;
+
+    // ── Position longue / courte (drag: a=entry, b=TP preview) ─────────
+    case 'position_long':
+    case 'position_short': {
+      const sl = { x: b.x, y: a.y + (a.y - b.y) }; // SL symétrique
+      ctx.save();
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = '#26A69A';
+      ctx.fillRect(0, Math.min(a.y, b.y), W, Math.abs(a.y - b.y));
+      ctx.fillStyle = '#EF5350';
+      ctx.fillRect(0, Math.min(a.y, sl.y), W, Math.abs(a.y - sl.y));
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#2196F3'; ctx.setLineDash([5, 3]);
+      ctx.beginPath(); ctx.moveTo(0, a.y); ctx.lineTo(W, a.y); ctx.stroke();
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = '#26A69A';
+      ctx.beginPath(); ctx.moveTo(0, b.y); ctx.lineTo(W, b.y); ctx.stroke();
+      ctx.strokeStyle = '#EF5350';
+      ctx.beginPath(); ctx.moveTo(0, sl.y); ctx.lineTo(W, sl.y); ctx.stroke();
+      ctx.restore();
+      break;
+    }
+
+    // ── Plage de prix ───────────────────────────────────────────────────
+    case 'price_range':
+      ctx.beginPath(); ctx.moveTo(0, a.y); ctx.lineTo(W, a.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, b.y); ctx.lineTo(W, b.y); ctx.stroke();
+      break;
+
+    // ── Plage de dates ──────────────────────────────────────────────────
+    case 'date_range':
+      ctx.beginPath(); ctx.moveTo(a.x, 0); ctx.lineTo(a.x, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(b.x, 0); ctx.lineTo(b.x, H); ctx.stroke();
+      break;
+
+    // ── Plage date + prix ───────────────────────────────────────────────
+    case 'datetime_range':
+      ctx.beginPath();
+      ctx.rect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+      ctx.stroke();
+      break;
   }
 
   ctx.restore();
@@ -496,6 +687,31 @@ function hitTest(d, px, py, toPixel, W, H) {
       if (pts.length < 2) return Math.abs(py - a.y) < HIT;
       const yMin = Math.min(a.y, b.y), yMax = Math.max(a.y, b.y);
       return py >= yMin - HIT && py <= yMax + HIT;
+    }
+    case 'position_long':
+    case 'position_short': {
+      if (!pts[0]) return false;
+      const entry = pts[0];
+      const tp  = pts[1] ?? entry;
+      const sl  = pts[2] ?? { x: entry.x, y: entry.y + (entry.y - tp.y) };
+      return Math.abs(py - entry.y) < HIT ||
+             Math.abs(py - tp.y)    < HIT ||
+             Math.abs(py - sl.y)    < HIT;
+    }
+    case 'price_range':
+      return Math.abs(py - a.y) < HIT || Math.abs(py - (pts[1]?.y ?? a.y)) < HIT;
+    case 'date_range':
+      return Math.abs(px - a.x) < HIT || Math.abs(px - (pts[1]?.x ?? a.x)) < HIT;
+    case 'datetime_range': {
+      if (pts.length < 2) return false;
+      const xMin = Math.min(a.x, b.x), xMax = Math.max(a.x, b.x);
+      const yMin = Math.min(a.y, b.y), yMax = Math.max(a.y, b.y);
+      return (
+        distToSegment(px, py, xMin, yMin, xMax, yMin) < HIT ||
+        distToSegment(px, py, xMax, yMin, xMax, yMax) < HIT ||
+        distToSegment(px, py, xMax, yMax, xMin, yMax) < HIT ||
+        distToSegment(px, py, xMin, yMax, xMin, yMin) < HIT
+      );
     }
     default: return false;
   }
@@ -741,6 +957,13 @@ export default function DrawingCanvas({
       const logical   = toLogical(x, y);
       if (!logical) return;
 
+      // Drag-based tools: entry on pointerdown, TP on pointerup (SL mirrored)
+      if (DRAG_TOOLS.has(activeTool)) {
+        draftRef.current = { type: activeTool, points: [{ x, y, ...logical }], preview: { x, y }, isDrag: true };
+        redraw();
+        return;
+      }
+
       // Single-click tools
       if (required === 1) {
         onDrawingAdd(activeTool, [logical]);
@@ -824,7 +1047,27 @@ export default function DrawingCanvas({
       }));
     };
 
+    // Finalize drag-based tools (position_long / position_short) on pointerup
+    const onPointerUp = (e) => {
+      const draft = draftRef.current;
+      if (!draft?.isDrag) return;
+      const { x, y } = getXY(e);
+      const tp = toLogical(x, y);
+      if (tp && draft.points[0]) {
+        const entry = { time: draft.points[0].time, price: draft.points[0].price };
+        const slPrice = entry.price - (tp.price - entry.price);
+        onDrawingAdd(activeTool, [
+          entry,
+          { time: tp.time,    price: tp.price  },
+          { time: entry.time, price: slPrice    },
+        ]);
+      }
+      draftRef.current = null;
+      redraw();
+    };
+
     canvas.addEventListener('pointerdown',  onPointerDown);
+    canvas.addEventListener('pointerup',    onPointerUp);
     canvas.addEventListener('pointermove',  onPointerMove);
     canvas.addEventListener('pointerleave', onPointerLeave);
     canvas.addEventListener('dblclick',     onDblClick);
@@ -832,6 +1075,7 @@ export default function DrawingCanvas({
 
     return () => {
       canvas.removeEventListener('pointerdown',  onPointerDown);
+      canvas.removeEventListener('pointerup',    onPointerUp);
       canvas.removeEventListener('pointermove',  onPointerMove);
       canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('dblclick',     onDblClick);
@@ -855,6 +1099,7 @@ export default function DrawingCanvas({
   return (
     <canvas
       ref={canvasRef}
+      data-drawing-layer=""
       style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', zIndex: 10 }}
     />
   );

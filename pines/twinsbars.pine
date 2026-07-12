@@ -1,0 +1,91 @@
+// @version=6
+// =============================================================================
+//  Twins Bars
+//  Deux bougies consécutives, toutes deux "pleines" et de taille similaire.
+//
+//  Règle 1 — Bougie pleine : corps >= (mèche haute + mèche basse) * wickFactor
+//  Règle 2 — Taille similaire : min(corps1, corps2) / max(corps1, corps2) >= sizeRatio
+//  Direction :
+//    • Bull  = bougie baissière -> bougie haussière
+//    • Bear  = bougie haussière -> bougie baissière
+//
+//  Portage de lib/patterns.js > calcTwinsBars() de l'app Grapher.
+//  Le marqueur est posé sur la 2e bougie du couple.
+// =============================================================================
+indicator("Twins Bars", overlay = true, max_labels_count = 500)
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+grpDet = "Détection"
+direction  = input.string("Les deux", "Direction", options = ["Haussier", "Baissier", "Les deux"], group = grpDet)
+sizeRatio  = input.float(0.7, "Ratio de taille (min/max corps)", minval = 0.0, maxval = 1.0, step = 0.05, group = grpDet, tooltip = "0.7 = corps dans une fourchette ×0.7–1.3 (valeur de l'app)")
+wickFactor = input.float(1.0, "Facteur de mèche", minval = 0.0, step = 0.1, group = grpDet, tooltip = "Bougie pleine si corps >= (mèche haute + mèche basse) × ce facteur. 1.0 = règle de l'app.")
+minBodyPts = input.float(0.0, "Taille min corps (points)", minval = 0.0, step = 1.0, group = grpDet, tooltip = "Corps minimum de CHAQUE bougie, en points. 0 = pas de minimum. 1 point = syminfo.mintick.")
+maxBodyPts = input.float(0.0, "Taille max corps (points)", minval = 0.0, step = 1.0, group = grpDet, tooltip = "Corps maximum de CHAQUE bougie, en points. 0 = pas de maximum. 1 point = syminfo.mintick.")
+
+grpSty = "Style"
+bullColor  = input.color(#26A69A, "Couleur haussière", group = grpSty)
+bearColor  = input.color(#EF5350, "Couleur baissière", group = grpSty)
+markerSize = input.string("Petit",  "Taille marqueur", options = ["Petit", "Normal", "Grand"], group = grpSty)
+showLabel  = input.bool(true, "Afficher le label \"TB\"", group = grpSty)
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+// Corps et mèches d'une bougie donnée (offset).
+body(off)      => math.abs(close[off] - open[off])
+upperWick(off) => high[off] - math.max(open[off], close[off])
+lowerWick(off) => math.min(open[off], close[off]) - low[off]
+
+// Bougie pleine : corps > 0 et corps >= (mèches) * facteur.
+isFull(off) =>
+    b = body(off)
+    b > 0 and b >= (upperWick(off) + lowerWick(off)) * wickFactor
+
+sizeOK = body(1) > 0 and body(0) > 0 and (math.min(body(1), body(0)) / math.max(body(1), body(0))) >= sizeRatio
+
+// Corps de chaque bougie en points (1 point = syminfo.mintick).
+bodyPts(off) => body(off) / syminfo.mintick
+// Bornes min/max en points appliquées aux DEUX bougies (0 = borne désactivée).
+withinMin = minBodyPts <= 0 or (bodyPts(1) >= minBodyPts and bodyPts(0) >= minBodyPts)
+withinMax = maxBodyPts <= 0 or (bodyPts(1) <= maxBodyPts and bodyPts(0) <= maxBodyPts)
+sizePtsOK = withinMin and withinMax
+
+prevBear = close[1] < open[1]
+prevBull = close[1] > open[1]
+currBull = close > open
+currBear = close < open
+
+isBull = prevBear and currBull
+isBear = prevBull and currBear
+
+bothFull = isFull(1) and isFull(0)
+
+allowBull = direction == "Haussier" or direction == "Les deux"
+allowBear = direction == "Baissier" or direction == "Les deux"
+
+twinBull = bothFull and sizeOK and sizePtsOK and isBull and allowBull
+twinBear = bothFull and sizeOK and sizePtsOK and isBear and allowBear
+
+// ── Marqueurs ─────────────────────────────────────────────────────────────
+// plotshape exige une taille CONST -> un appel par taille, filtré par l'input.
+isSmall  = markerSize == "Petit"
+isLarge  = markerSize == "Grand"
+isNormal = not isSmall and not isLarge
+sz  = isSmall ? size.small : isLarge ? size.large : size.normal
+txt = showLabel ? "TB" : ""
+
+plotshape(twinBull and isSmall,  title = "Twins Bull (S)", style = shape.arrowup,   location = location.belowbar, color = bullColor, size = size.small)
+plotshape(twinBull and isNormal, title = "Twins Bull (M)", style = shape.arrowup,   location = location.belowbar, color = bullColor, size = size.normal)
+plotshape(twinBull and isLarge,  title = "Twins Bull (L)", style = shape.arrowup,   location = location.belowbar, color = bullColor, size = size.large)
+plotshape(twinBear and isSmall,  title = "Twins Bear (S)", style = shape.arrowdown, location = location.abovebar, color = bearColor, size = size.small)
+plotshape(twinBear and isNormal, title = "Twins Bear (M)", style = shape.arrowdown, location = location.abovebar, color = bearColor, size = size.normal)
+plotshape(twinBear and isLarge,  title = "Twins Bear (L)", style = shape.arrowdown, location = location.abovebar, color = bearColor, size = size.large)
+
+// Label texte optionnel, positionné comme dans l'app
+// (plus bas des deux lows pour bull, plus haut des deux highs pour bear).
+if showLabel and twinBull
+    label.new(bar_index, math.min(low, low[1]), txt, style = label.style_label_up,   color = color.new(bullColor, 80), textcolor = bullColor, size = sz)
+if showLabel and twinBear
+    label.new(bar_index, math.max(high, high[1]), txt, style = label.style_label_down, color = color.new(bearColor, 80), textcolor = bearColor, size = sz)
+
+// ── Alertes ───────────────────────────────────────────────────────────────
+alertcondition(twinBull, "Twins Bars haussier", "Twins Bars haussier détecté")
+alertcondition(twinBear, "Twins Bars baissier", "Twins Bars baissier détecté")
