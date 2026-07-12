@@ -92,6 +92,7 @@ export default function TradingChart({
 
   const tradePriceLinesRef = useRef([]);
   const candlesByTimeRef = useRef(new Map());
+  const prevCandlesRef   = useRef(null);
   const maDataMapRef     = useRef(new Map());
   const bbDataMapRef     = useRef(new Map());
   const rsiDataMapRef    = useRef(new Map());
@@ -390,25 +391,51 @@ export default function TradingChart({
   }, [openTrades]);
 
   // ── Candle + volume data ──────────────────────────────────────────────────
+  const volBar = (c) => ({
+    time:  c.time,
+    value: c.volume,
+    color: c.close >= c.open ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
+  });
+
   useEffect(() => {
     if (!candleSeriesRef.current || !candles?.length) return;
-    const ts        = chartRef.current.timeScale();
-    const prevRange = ts.getVisibleRange();
-    candleSeriesRef.current.setData(
-      candles.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })),
-    );
-    volumeSeriesRef.current.setData(
-      candles.map(({ time, open, close, volume }) => ({
-        time,
-        value: volume,
-        color: close >= open ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
-      })),
-    );
-    if (replayPlayingRef.current) {
-      ts.scrollToRealTime();
+    const ts   = chartRef.current.timeScale();
+    const prev = prevCandlesRef.current;
+
+    // Mise à jour live (polling) : seul le dernier bucket a changé et/ou des
+    // bougies se sont ajoutées à droite → series.update() incrémental.
+    // La vue N'EST JAMAIS déplacée : LWC ne décale que si l'utilisateur est
+    // déjà collé au bord droit (comportement natif), sinon rien ne bouge.
+    const isLiveAppend =
+      prev && prev.length > 1 &&
+      candles.length >= prev.length &&
+      candles[0].time === prev[0].time &&
+      candles[prev.length - 1].time === prev[prev.length - 1].time &&
+      candles[prev.length - 2].time === prev[prev.length - 2].time;
+
+    if (isLiveAppend) {
+      for (let i = prev.length - 1; i < candles.length; i++) {
+        const c = candles[i];
+        candleSeriesRef.current.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close });
+        volumeSeriesRef.current.update(volBar(c));
+      }
+      if (replayPlayingRef.current) ts.scrollToRealTime();
     } else {
-      prevRange ? ts.setVisibleRange(prevRange) : ts.fitContent();
+      // Rechargement structurel (symbole/TF, prepend d'historique, bascule
+      // grouped/candle) : setData complet en préservant la vue courante.
+      const prevRange = ts.getVisibleRange();
+      candleSeriesRef.current.setData(
+        candles.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })),
+      );
+      volumeSeriesRef.current.setData(candles.map(volBar));
+      if (replayPlayingRef.current) {
+        ts.scrollToRealTime();
+      } else {
+        prevRange ? ts.setVisibleRange(prevRange) : ts.fitContent();
+      }
     }
+
+    prevCandlesRef.current   = candles;
     candlesByTimeRef.current = new Map(candles.map(c => [c.time, c]));
   }, [candles]);
 

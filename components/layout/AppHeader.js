@@ -3,10 +3,11 @@ import styles from './AppHeader.module.css';
 
 export default function AppHeader({
   symbols, symbolId, onSymbolChange,
-  onImport, onManage, onSettings, onReplay, onRsi, onChat,
+  onImport, onManage, onSettings, onReplay, onRsi, onChat, onBacktest,
   isReplayMode = false,
   replaySymbolName = '',
   isRsiMode = false,
+  isBacktestMode = false,
   onBack,
 }) {
   return (
@@ -21,7 +22,7 @@ export default function AppHeader({
         <span className={styles.logoText}>GRAPHER</span>
       </div>
 
-      {isReplayMode ? (
+      {isReplayMode || isBacktestMode ? (
         <span className={styles.replaySymbol}>{replaySymbolName}</span>
       ) : (
         <select
@@ -40,7 +41,7 @@ export default function AppHeader({
 
       <div className={styles.spacer} />
 
-      {isReplayMode || isRsiMode ? (
+      {isReplayMode || isRsiMode || isBacktestMode ? (
         <button className={styles.backBtn} onClick={onBack} aria-label="Retour au graphique">
           ← Retour
         </button>
@@ -60,6 +61,15 @@ export default function AppHeader({
           {onRsi && (
             <button className={styles.rsiBtn} onClick={onRsi} aria-label="Analyse RSI">
               RSI
+            </button>
+          )}
+          {onBacktest && (
+            <button className={styles.backtestBtn} onClick={onBacktest} aria-label="Backtest de stratégies">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ marginRight: 5 }}>
+                <polyline points="3,17 9,11 13,15 21,7"/>
+                <polyline points="15,7 21,7 21,13"/>
+              </svg>
+              Backtest
             </button>
           )}
           {onChat && (
@@ -92,6 +102,11 @@ export default function AppHeader({
         <div className={styles.rsiBadge} aria-label="Mode RSI actif">
           <span className={styles.rsiDot} aria-hidden="true"/>
           <span className={styles.rsiLabel}>RSI</span>
+        </div>
+      ) : isBacktestMode ? (
+        <div className={styles.backtestBadge} aria-label="Mode Backtest actif">
+          <span className={styles.backtestDot} aria-hidden="true"/>
+          <span className={styles.backtestLabel}>BACKTEST</span>
         </div>
       ) : (
         <div className={styles.live} aria-label="Live data">

@@ -129,6 +129,7 @@ export default function Home() {
         onSettings={() => setShowSettings(true)}
         onReplay={() => setShowReplay(true)}
         onRsi={() => router.push('/rsi')}
+        onBacktest={() => router.push('/backtest')}
         onChat={() => setShowChat(true)}
       />
       <StatsBar allBars={allBars} currentSym={currentSym} loading={loading} />

@@ -1,0 +1,285 @@
+//@version=6
+// =========================================================================
+//  STRATEGY : Harmonie Multi-HTF — MIN (backtest)
+//
+//  Version stratégie de TRENDER.pine :
+//    - Début de zone d'harmonie HAUSSIÈRE (tous les HTF actifs haussiers)
+//      -> entrée LONG
+//    - Début de zone d'harmonie BAISSIÈRE (tous les HTF actifs baissiers)
+//      -> entrée SHORT
+//  Filtre optionnel : ne trader que les zones confirmées par un HTF donné.
+//  Sortie uniquement sur Stop Loss ou Take Profit en POINTS FIXES.
+//
+//  Option REVENGER : après un Stop Loss, si le prix revient au niveau
+//  d'entrée d'origine, ré-entrée dans le même sens (ordre stop) avec :
+//    - objectif  = R:R x distance du SL (R:R = 1 -> récupère le SL perdu)
+//    - stop loss = l'ancien niveau de SL
+//  Conditions de maintien : la zone d'harmonie d'origine doit toujours
+//  être active, et l'ordre expire après N bougies (60 par défaut).
+//  Une seule tentative de revanche par SL : une revanche perdante ne
+//  déclenche pas de nouvelle revanche, et un nouveau signal annule
+//  toute revanche en attente.
+//
+//  Option BREAK-EVEN : quand le gain atteint un seuil (points), le SL est
+//  déplacé au prix d'entrée (+/- décalage). S'applique aussi aux trades
+//  de revanche ; une sortie au break-even ne déclenche pas de revanche.
+//
+//  Calcul NON-REPAINT (lookahead_on + [1] = dernière bougie HTF clôturée).
+// =========================================================================
+strategy("Harmonie Multi-HTF Strategy — SL/TP fixes + Revenger",
+     overlay = true,
+     initial_capital = 100,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     pyramiding = 0,
+     commission_type = strategy.commission.cash_per_contract,
+     commission_value = 0.0,
+     calc_on_every_tick = false,
+     max_labels_count = 500)
+
+// ============================ INPUTS =====================================
+grpHtf  = "Biais — 3 unités de temps supérieures"
+useHtf1 = input.bool(true,  "HTF 1", inline = "h1", group = grpHtf)
+htf1    = input.timeframe("60",  "", inline = "h1", group = grpHtf)
+useHtf2 = input.bool(true,  "HTF 2", inline = "h2", group = grpHtf)
+htf2    = input.timeframe("240", "", inline = "h2", group = grpHtf)
+useHtf3 = input.bool(true,  "HTF 3", inline = "h3", group = grpHtf)
+htf3    = input.timeframe("960", "", inline = "h3", group = grpHtf)
+
+bbLen   = input.int(50,     "Bollinger — période",    minval = 1,    group = grpHtf)
+bbMult  = input.float(0.369,"Bollinger — écart-type", minval = 0.01, step = 0.001, group = grpHtf)
+
+grpTrade  = "Trading"
+tradeDir  = input.string("Les deux", "Sens autorisé", options = ["Les deux", "Long uniquement", "Short uniquement"], group = grpTrade)
+invertSig = input.bool(false, "Inverser les signaux (contre-tendance)", group = grpTrade,
+     tooltip = "Par défaut : harmonie haussière -> LONG, harmonie baissière -> SHORT (suivi de tendance, logique de l'indicateur). Coché : harmonie haussière -> SHORT, harmonie baissière -> LONG.")
+slPoints  = input.float(50.0,  "Stop Loss (points)",   minval = 0.0, step = 1.0, group = grpTrade,
+     tooltip = "Distance en points (unités de prix) depuis le prix d'entrée. 0 = désactivé.")
+tpPoints  = input.float(100.0, "Take Profit (points)", minval = 0.0, step = 1.0, group = grpTrade,
+     tooltip = "Distance en points (unités de prix) depuis le prix d'entrée. 0 = désactivé.")
+
+grpBe = "Break-even"
+beOn  = input.bool(false, "Activer le break-even", group = grpBe,
+     tooltip = "Quand le gain atteint le seuil de déclenchement, le Stop Loss est déplacé au prix d'entrée (+/- décalage). S'applique aussi aux trades de revanche. Un trade sorti au break-even ne déclenche pas de revanche.")
+beTrigger = input.float(50.0, "Déclenchement (points de gain)", minval = 1.0, step = 1.0, group = grpBe,
+     tooltip = "Gain (en points depuis l'entrée) à atteindre pour déplacer le SL au break-even.")
+beOffset  = input.float(0.0, "Décalage du BE (points)", step = 1.0, group = grpBe,
+     tooltip = "SL déplacé à : prix d'entrée + décalage (long) / prix d'entrée - décalage (short). Positif = sécurise un petit gain.")
+
+// Filtre : ne trader que les zones confirmées par un HTF donné.
+grpFlt  = "Filtre — HTF confirmateur"
+confFlt = input.string("Off (toutes)", "Trader les zones confirmées par", group = grpFlt,
+     options = ["Off (toutes)", "HTF 1", "HTF 2", "HTF 3"],
+     tooltip = "Le HTF confirmateur est celui dont la tendance a basculé sur la bougie de détection (les autres étaient déjà alignés). Quand un HTF est choisi, seules les zones qu'il a confirmées déclenchent une entrée.")
+
+grpRv = "Revenger"
+rvOn  = input.bool(false, "Activer le mode Revenger", group = grpRv,
+     tooltip = "Après un Stop Loss : si le prix revient au niveau d'entrée d'origine ET que la zone d'harmonie d'origine est toujours active, ré-entre dans le même sens. SL = ancien niveau, objectif = R:R x distance du SL. Une seule tentative par SL. Nécessite un Stop Loss > 0.")
+rvRR = input.float(1.0, "Objectif de la revanche (R:R, multiple du SL)", minval = 0.1, step = 0.1, group = grpRv,
+     tooltip = "Distance du TP de la revanche = R:R x distance du SL. 1.0 = récupère exactement le SL perdu.")
+rvMaxBars = input.int(60, "Expiration de la revanche (bougies, 0 = jamais)", minval = 0, group = grpRv,
+     tooltip = "Annule l'ordre de revanche si le prix n'est pas revenu au niveau d'entrée après N bougies.")
+
+grpView  = "Affichage"
+showBg   = input.bool(true, "Colorer le fond des zones", group = grpView)
+showMark = input.bool(true, "Marquer le début des zones", group = grpView)
+bgTransp = input.int(80, "Transparence du fond", minval = 0, maxval = 100, group = grpView)
+colBull  = input.color(color.green, "Couleur haussière", group = grpView)
+colBear  = input.color(color.red,   "Couleur baissière", group = grpView)
+
+// Bollinger du timeframe ACTUEL (affichage) — indépendante de la BB
+// utilisée pour le biais HTF (réglages séparés).
+grpBbCur   = "Bollinger — timeframe actuel (affichage)"
+showBbCur  = input.bool(true,  "Afficher les BB du timeframe actuel", group = grpBbCur)
+bbCurLen   = input.int(50,     "Période",    minval = 1,    group = grpBbCur)
+bbCurMult  = input.float(0.369, "Écart-type", minval = 0.01, step = 0.001, group = grpBbCur)
+colBbCur   = input.color(color.blue, "Couleur des bandes", group = grpBbCur)
+
+// ============================ BIAIS HTF ==================================
+// Renvoie 1 (haussier), -1 (baissier), 0 (neutre) pour une TF donnée.
+// NON-REPAINT : lookahead_on + [1] => valeur de la dernière bougie HTF close.
+f_trend(simple string tf) =>
+    [basis, dev, cl] = request.security(syminfo.tickerid, tf,
+         [ta.sma(close, bbLen)[1],
+          (bbMult * ta.stdev(close, bbLen))[1],
+          close[1]],
+         lookahead = barmerge.lookahead_on)
+    cl > basis + dev ? 1 : cl < basis - dev ? -1 : 0
+
+t1 = f_trend(htf1)
+t2 = f_trend(htf2)
+t3 = f_trend(htf3)
+
+score  = (useHtf1 ? t1 : 0) + (useHtf2 ? t2 : 0) + (useHtf3 ? t3 : 0)
+active = (useHtf1 ? 1 : 0)  + (useHtf2 ? 1 : 0)  + (useHtf3 ? 1 : 0)
+
+// Harmonie STRICTE : tous les HTF actifs alignés dans le même sens
+harmonyBull = active > 0 and score ==  active
+harmonyBear = active > 0 and score == -active
+
+// ==================== DÉTECTION & CONFIRMATEURS ==========================
+startBull = harmonyBull and not harmonyBull[1]
+startBear = harmonyBear and not harmonyBear[1]
+
+// HTF confirmateurs : ceux dont la tendance a basculé sur la bougie de
+// détection (les autres étaient déjà alignés).
+c1 = (startBull or startBear) and useHtf1 and t1 != t1[1]
+c2 = (startBull or startBear) and useHtf2 and t2 != t2[1]
+c3 = (startBull or startBear) and useHtf3 and t3 != t3[1]
+
+// Filtre par HTF confirmateur : évalué à la détection puis figé pour toute
+// la durée de la zone.
+var bool zoneVis = true
+if startBull or startBear
+    zoneVis := confFlt == "Off (toutes)" or
+         (confFlt == "HTF 1" ? c1 : confFlt == "HTF 2" ? c2 : c3)
+
+// ============================ SIGNAUX =====================================
+longSignal  = (invertSig ? startBear : startBull) and zoneVis
+shortSignal = (invertSig ? startBull : startBear) and zoneVis
+
+allowLong  = tradeDir != "Short uniquement"
+allowShort = tradeDir != "Long uniquement"
+
+// ========================== BREAK-EVEN (état) =============================
+// Déclenché quand le gain atteint le seuil ; le SL est déplacé dans la
+// section « gestion des sorties ». Réinitialisé à chaque nouvelle position.
+var bool beActive = false
+if math.sign(strategy.position_size) != math.sign(nz(strategy.position_size[1]))
+    beActive := false
+if beOn and not beActive and strategy.position_size != 0
+    beActive := strategy.position_size > 0 ?
+         high >= strategy.position_avg_price + beTrigger :
+         low  <= strategy.position_avg_price - beTrigger
+
+// ============================ REVENGER ====================================
+var bool  rvPending  = false   // ordre de revanche en attente d'exécution
+var int   rvDir      = 0       // 1 = long, -1 = short
+var float rvEntryLvl = na      // ancien prix d'entrée (niveau de ré-entrée)
+var float rvStopLvl  = na      // ancien niveau de SL
+var float rvTpLvl    = na      // objectif = R:R x distance du SL
+var int   rvSetBar   = 0
+
+// Détection : le dernier trade clôturé est-il un SL sur un trade normal ?
+// (les trades "RV" sont exclus -> une seule tentative de revanche par SL)
+if rvOn and slPoints > 0 and strategy.closedtrades > nz(strategy.closedtrades[1])
+    idx     = strategy.closedtrades - 1
+    eId     = strategy.closedtrades.entry_id(idx)
+    xId     = strategy.closedtrades.exit_id(idx)
+    normal  = eId == "Long" or eId == "Short"
+    wasLong = strategy.closedtrades.size(idx) > 0
+    entryP  = strategy.closedtrades.entry_price(idx)
+    exitP   = strategy.closedtrades.exit_price(idx)
+    // SL = sortie via l'ordre SL/TP (pas une inversion) du côté perdant ;
+    // une sortie au break-even ne compte pas comme un SL
+    hitSL   = str.contains(xId, "SL/TP") and not beActive and (wasLong ? exitP < entryP : exitP > entryP)
+    if normal and hitSL
+        rvPending  := true
+        rvDir      := wasLong ? 1 : -1
+        rvEntryLvl := entryP
+        rvStopLvl  := wasLong ? entryP - slPoints : entryP + slPoints
+        rvTpLvl    := wasLong ? entryP + slPoints * rvRR : entryP - slPoints * rvRR
+        rvSetBar   := bar_index
+
+// La zone d'harmonie d'origine doit toujours être active, sinon la revanche tombe
+rvZoneOk = rvDir == 1 ? (invertSig ? harmonyBear : harmonyBull) : (invertSig ? harmonyBull : harmonyBear)
+if rvPending and not rvZoneOk
+    rvPending := false
+
+// Expiration éventuelle de la revanche
+if rvPending and rvMaxBars > 0 and bar_index - rvSetBar >= rvMaxBars
+    rvPending := false
+
+// Un nouveau signal a priorité : il annule toute revanche en attente
+newSignal = (longSignal and allowLong) or (shortSignal and allowShort)
+if newSignal and rvPending
+    rvPending := false
+
+// La revanche vient d'être remplie -> plus d'ordre en attente
+rvOpen = strategy.opentrades > 0 and str.contains(strategy.opentrades.entry_id(strategy.opentrades - 1), "RV")
+if rvOpen
+    rvPending := false
+
+if not rvPending
+    strategy.cancel("Long RV")
+    strategy.cancel("Short RV")
+
+// ============================ ORDRES ======================================
+// Conversion points (unités de prix) -> ticks pour strategy.exit
+slTicks = slPoints > 0 ? slPoints / syminfo.mintick : na
+tpTicks = tpPoints > 0 ? tpPoints / syminfo.mintick : na
+
+// Entrées normales : l'exit est placé avec l'entrée pour que le SL/TP soit
+// déjà actif sur la bougie d'exécution.
+if longSignal and allowLong
+    strategy.entry("Long", strategy.long)
+    if slPoints > 0 or tpPoints > 0
+        strategy.exit("Long SL/TP", from_entry = "Long", loss = slTicks, profit = tpTicks)
+
+if shortSignal and allowShort
+    strategy.entry("Short", strategy.short)
+    if slPoints > 0 or tpPoints > 0
+        strategy.exit("Short SL/TP", from_entry = "Short", loss = slTicks, profit = tpTicks)
+
+// Ordre stop de revanche : ré-entrée quand le prix revient au niveau d'entrée
+// d'origine. TP = R:R x distance du SL, SL = ancien niveau.
+if rvPending
+    if rvDir == 1
+        strategy.entry("Long RV", strategy.long, stop = rvEntryLvl)
+        strategy.exit("Long RV SL/TP", from_entry = "Long RV", stop = rvStopLvl, limit = rvTpLvl)
+    else
+        strategy.entry("Short RV", strategy.short, stop = rvEntryLvl)
+        strategy.exit("Short RV SL/TP", from_entry = "Short RV", stop = rvStopLvl, limit = rvTpLvl)
+
+// ==================== GESTION DES SORTIES (break-even) ====================
+// Les sorties sont ré-émises à chaque bougie en position ; si le break-even
+// est déclenché, le stop est remonté au prix d'entrée (+/- décalage).
+float curStopLine = na
+float curTpLine   = na
+if strategy.position_size != 0
+    avg    = strategy.position_avg_price
+    isL    = strategy.position_size > 0
+    beStop = isL ? avg + beOffset : avg - beOffset
+    if rvOpen
+        stopP = beActive ? (isL ? math.max(rvStopLvl, beStop) : math.min(rvStopLvl, beStop)) : rvStopLvl
+        strategy.exit(isL ? "Long RV SL/TP" : "Short RV SL/TP",
+             from_entry = isL ? "Long RV" : "Short RV", stop = stopP, limit = rvTpLvl)
+        curStopLine := stopP
+        curTpLine   := rvTpLvl
+    else
+        origStop = slPoints > 0 ? (isL ? avg - slPoints : avg + slPoints) : na
+        stopP    = beActive ? (na(origStop) ? beStop : (isL ? math.max(beStop, origStop) : math.min(beStop, origStop))) : origStop
+        limitP   = tpPoints > 0 ? (isL ? avg + tpPoints : avg - tpPoints) : na
+        if not na(stopP) or not na(limitP)
+            strategy.exit(isL ? "Long SL/TP" : "Short SL/TP",
+                 from_entry = isL ? "Long" : "Short", stop = stopP, limit = limitP)
+        curStopLine := stopP
+        curTpLine   := limitP
+
+// ============================ VISUEL =====================================
+bg = harmonyBull ? color.new(colBull, bgTransp) : harmonyBear ? color.new(colBear, bgTransp) : na
+bgcolor(showBg and zoneVis ? bg : na, title = "Zone favorable")
+
+plotshape(showMark and startBull and zoneVis, title = "Début zone haussière", style = shape.triangleup,
+     location = location.belowbar, color = colBull, size = size.tiny)
+plotshape(showMark and startBear and zoneVis, title = "Début zone baissière", style = shape.triangledown,
+     location = location.abovebar, color = colBear, size = size.tiny)
+
+// Niveau de ré-entrée de la revanche en attente
+plot(rvPending ? rvEntryLvl : na, "Niveau de revanche (attente)",
+     color = color.new(color.orange, 0), style = plot.style_linebr)
+
+// Lignes entrée / SL / TP de la position en cours (SL = niveau effectif,
+// break-even compris)
+avgPrice = strategy.position_size != 0 ? strategy.position_avg_price : na
+plot(avgPrice,    "Prix d'entrée", color = color.new(color.gray, 30),  style = plot.style_linebr)
+plot(curStopLine, "Stop Loss",     color = color.new(color.red, 30),   style = plot.style_linebr)
+plot(curTpLine,   "Take Profit",   color = color.new(color.green, 30), style = plot.style_linebr)
+
+// Bollinger du timeframe actuel (affichage)
+bbCurBasis = ta.sma(close, bbCurLen)
+bbCurDev   = bbCurMult * ta.stdev(close, bbCurLen)
+pBbBasis = plot(showBbCur ? bbCurBasis : na,            "BB actuel — base",  color = color.new(colBbCur, 30))
+pBbUpper = plot(showBbCur ? bbCurBasis + bbCurDev : na, "BB actuel — haute", color = color.new(colBbCur, 0))
+pBbLower = plot(showBbCur ? bbCurBasis - bbCurDev : na, "BB actuel — basse", color = color.new(colBbCur, 0))
+fill(pBbUpper, pBbLower, color = showBbCur ? color.new(colBbCur, 92) : na, title = "BB actuel — remplissage")

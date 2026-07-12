@@ -1,7 +1,8 @@
 import fs from 'fs';
 import readline from 'readline';
 import formidable from 'formidable';
-import { query, run, exec } from '../../lib/db';
+import { query, exec } from '../../lib/db';
+import { getOrCreateSymbol } from '../../lib/ingest';
 import { parseFilename, detectCsvType } from '../../lib/parsers';
 
 export const config = {
@@ -21,18 +22,6 @@ function readFirstLine(filepath) {
 
 function safePath(p) {
   return p.replace(/'/g, "''");
-}
-
-async function getOrCreateSymbol(name) {
-  let [sym] = await query('SELECT id FROM symbols WHERE name = ?', name);
-  if (!sym) {
-    await run(
-      "INSERT INTO symbols (id, name) VALUES (nextval('seq_symbols'), ?) ON CONFLICT DO NOTHING",
-      name,
-    );
-    [sym] = await query('SELECT id FROM symbols WHERE name = ?', name);
-  }
-  return sym.id;
 }
 
 // ── Tick streaming helpers ────────────────────────────────────────────────────

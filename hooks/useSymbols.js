@@ -32,6 +32,15 @@ export function useSymbols() {
   // Chargement initial : restaure le dernier symbole sélectionné
   useEffect(() => { loadSymbols(savedId()); }, [loadSymbols]);
 
+  // Rafraîchissement périodique : compteurs de bougies à jour et symboles
+  // créés par l'EA MT5 qui apparaissent sans recharger la page.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!document.hidden) loadSymbols();
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [loadSymbols]);
+
   // Persistance du symbolId courant
   useEffect(() => {
     if (symbolId != null) localStorage.setItem(KEY, symbolId);

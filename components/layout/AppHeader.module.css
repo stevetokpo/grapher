@@ -237,6 +237,57 @@
 }
 .rsiBtn:active { transform: scale(0.97); }
 
+/* ── Backtest button (main header) ────────────────────────────── */
+.backtestBtn {
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+  background: rgba(96, 165, 250, 0.08);
+  color: var(--blue);
+  box-shadow: var(--inset-hi);
+  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+.backtestBtn:hover {
+  background: rgba(96, 165, 250, 0.16);
+  border-color: rgba(96, 165, 250, 0.65);
+  box-shadow: var(--glow-blue), var(--inset-hi);
+}
+.backtestBtn:active { transform: scale(0.97); }
+
+/* ── Backtest badge (replaces LIVE in backtest mode) ──────────── */
+.backtestBadge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.backtestDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.70);
+  animation: rsi-pulse 1.8s ease-in-out infinite;
+}
+
+.backtestLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--blue);
+  opacity: 0.70;
+}
+
 /* ── IA button (main header) ──────────────────────────────────── */
 .aiBtn {
   display: flex;
