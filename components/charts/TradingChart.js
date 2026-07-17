@@ -1,22 +1,35 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, CrosshairMode, LineStyle } from 'lightweight-charts';
 import { calcMA, calcRSI, calcBB, calcSwings } from '../../lib/indicators';
-import { calcTwinsBars, calcFVG, calcHBHBHB, calcCompression, calcHBHB } from '../../lib/patterns';
+import { calcEquilibrium } from '../../lib/equilibrium';
+import { calcHarmony } from '../../lib/harmony';
+import { createHarmonyPrimitive } from './HarmonyPrimitive';
+import { calcTwinsBars, calcFVG, calcRFVG, calcRFVGPositions, calcHBHBHB, calcCompression, calcHBHB } from '../../lib/patterns';
 import { createFvgPrimitive } from './FvgPrimitive';
 import { createHbhPrimitive } from './HbhPrimitive';
 import { createHbhbPrimitive } from './HbhbPrimitive';
 import { createCompressionPrimitive } from './CompressionPrimitive';
+import { createEquilibriumPrimitive } from './EquilibriumPrimitive';
+import { createTradesPrimitive } from './TradesPrimitive';
 import DrawingCanvas from './DrawingCanvas';
 import TradeSetup    from '../replay/TradeSetup';
 import styles from './TradingChart.module.css';
 
 const PREFETCH_THRESHOLD = 50;
 
-// RSI pane sizing (fraction of total chart height)
+// Bottom oscillator pane sizing (fraction of total chart height). Shared by any
+// 0-100 indicator that asks for it — RSI, and the EQ balance score.
 const RSI_H_DEFAULT = 0.27;
 const RSI_H_MIN     = 0.10;
 const RSI_H_MAX     = 0.50;
 const RSI_BOTTOM    = 0.01; // tiny bottom margin (time scale spacing)
+
+// Fixed -8 → 108 pane scale: ~7% breathing room so a 0-100 line never clips
+// against the pane edges.
+const OSC_SCALE = () => ({
+  priceRange: { minValue: -8, maxValue: 108 },
+  margins: { above: 0, below: 0 },
+});
 
 const BG_MAIN = '#0B0E17';
 
@@ -42,6 +55,62 @@ function fmtVol(v) {
   return Math.round(v).toLocaleString();
 }
 
+// ── EQ tooltip block ─────────────────────────────────────────────────────────
+// The score is a product of six conditions, so showing it alone would hide the
+// only interesting question: which one is failing.
+const EQ_COMPS = {
+  pull: 'Le point rappelle le prix (retour à la moyenne, hors échantillon)',
+  uni:  'Une seule valeur — pas deux distributions concurrentes',
+  conc: 'Valeur concentrée — pas étalée le long d\'une tendance',
+  flat: 'Aucune dérive nette sur la fenêtre',
+  sym:  'Acceptation symétrique de part et d\'autre du point',
+  prox: 'Le prix traite au point en ce moment',
+};
+
+function EqTooltip({ iv }) {
+  const balanced = iv.score >= iv.threshold;
+  return (
+    <div className={styles.eqBlock}>
+      <div className={styles.indRow}>
+        <span className={styles.indDot} style={{ background: iv.color }} />
+        <span className={styles.indLabel}>{iv.label}</span>
+        <span className={styles.indVal}>{fmtP(iv.value)}</span>
+      </div>
+
+      <div className={styles.eqScoreRow}>
+        <span className={styles.eqScoreVal} style={{ color: balanced ? iv.color : '#64748B' }}>
+          {iv.score.toFixed(0)}
+        </span>
+        <span className={styles.eqTrack}>
+          <span
+            className={styles.eqFill}
+            style={{ width: `${Math.max(0, Math.min(100, iv.score))}%`, background: iv.color, opacity: balanced ? 1 : 0.45 }}
+          />
+        </span>
+        <span className={styles.eqState} style={{ color: balanced ? iv.color : 'rgba(100,116,139,0.7)' }}>
+          {balanced ? 'équilibre' : 'hors équilibre'}
+        </span>
+      </div>
+
+      <div className={styles.eqComps}>
+        {Object.entries(iv.comps).map(([k, v]) => (
+          <span key={k} className={styles.eqComp} title={EQ_COMPS[k]}>
+            <span className={styles.eqCompKey}>{k}</span>
+            <span className={styles.eqCompTrack}>
+              <span
+                className={styles.eqCompFill}
+                style={{ width: `${Math.round(v * 100)}%`, background: iv.color, opacity: 0.35 + 0.65 * v }}
+              />
+            </span>
+          </span>
+        ))}
+      </div>
+
+      <div className={styles.eqVa}>valeur {fmtP(iv.val)} — {fmtP(iv.vah)}</div>
+    </div>
+  );
+}
+
 // Compute LWC scale margins from the RSI height fraction.
 // rsi.top = 1 - rsiH so the LWC plot area starts exactly where the drag handle
 // sits, keeping the backdrop-filter div and the LWC scale perfectly in sync.
@@ -55,6 +124,7 @@ function rsiMargins(rsiH) {
 export default function TradingChart({
   candles, onLoadMore,
   indicators = [],
+  htfBars = null,
   patterns = [],
   chartMode = 'candle',
   bullColor = '#26A69A', bearColor = '#EF5350',
@@ -64,6 +134,9 @@ export default function TradingChart({
   onDrawingAdd, onDrawingUpdate, onDrawingRemove, onDrawingSelect,
   replayPlaying = false,
   openTrades = [],
+  backtestTrades = [],          // trades fermés d'un backtest — dessinés comme des positions
+  selectedTradeId = null,
+  focusRange = null,            // { from, to } en temps — recadre le graphe (nouvel objet = nouveau recadrage)
   tradeSetupActive = false,
   tradeSetupEntry  = null,
   onTradeSetupConfirm,
@@ -80,11 +153,17 @@ export default function TradingChart({
   const bbSeriesMapRef      = useRef(new Map());
   const swingSeriesMapRef   = useRef(new Map());
   const rsiSeriesMapRef     = useRef(new Map());
+  const eqSeriesMapRef      = useRef(new Map());
+  const trenderMapRef       = useRef(new Map());
   const patternSeriesMapRef = useRef(new Map());
   const fvgPrimitiveRef         = useRef(null);
+  const rfvgPrimitiveRef        = useRef(null);
+  const rfvgPosPrimitiveRef     = useRef(null);
   const hbhPrimitiveRef         = useRef(null);
   const hbhbPrimitiveRef        = useRef(null);
   const compressionPrimitiveRef = useRef(null);
+  const tradesPrimitiveRef      = useRef(null);
+  const appliedFocusRef         = useRef(null);
   const onLoadMoreRef      = useRef(onLoadMore);
   const replayPlayingRef   = useRef(replayPlaying);
   useEffect(() => { onLoadMoreRef.current    = onLoadMore;    }, [onLoadMore]);
@@ -96,14 +175,26 @@ export default function TradingChart({
   const maDataMapRef     = useRef(new Map());
   const bbDataMapRef     = useRef(new Map());
   const rsiDataMapRef    = useRef(new Map());
+  const eqDataMapRef     = useRef(new Map());
   const indicatorsRef    = useRef(indicators);
   useEffect(() => { indicatorsRef.current = indicators; }, [indicators]);
 
   const [tooltip, setTooltip] = useState(null);
   const tooltipRef = useRef(null);
 
+  // TRENDER : l'HTF le plus lent manque d'historique dans la fenêtre chargée.
+  // Sans ça l'indicateur reste muet et l'utilisateur croit à un bug.
+  const [trenderWarmup, setTrenderWarmup] = useState(null);
+
   // ── Screenshot → presse-papier ────────────────────────────────────────────
   const [shotState, setShotState] = useState(null); // null | 'copied' | 'error'
+  // Moniteur rFVG : stats des positions simulées (mode « position »), null
+  // quand le pattern est éteint ou en représentation zone seule.
+  const [rfvgStats, setRfvgStats] = useState(null);
+  // Rapport rFVG : mêmes positions que le dessin et le moniteur, gardées pour
+  // le téléchargement JSON. Ref et non state : rien à re-rendre, le clic lit
+  // simplement la dernière valeur — donc toujours à jour au dernier chargement.
+  const rfvgReportRef = useRef(null);
   const shotTimerRef = useRef(null);
 
   const takeScreenshot = useCallback(async () => {
@@ -152,7 +243,10 @@ export default function TradingChart({
     return () => document.removeEventListener('pointerdown', handler);
   }, [tooltip]);
 
-  const hasRSI = indicators.some(i => i.type === 'RSI');
+  // Anything that wants the bottom 0-100 pane opens it.
+  const hasRSI = indicators.some(
+    i => i.type === 'RSI' || (i.type === 'EQ' && i.showScore !== false),
+  );
 
   // ── Drag handle: resize RSI pane ─────────────────────────────────────────
   const onHandlePointerDown = useCallback((e) => {
@@ -282,6 +376,14 @@ export default function TradingChart({
         } else if (ind.type === 'RSI') {
           const val = rsiDataMapRef.current.get(ind.id)?.get(time);
           if (val != null) indValues.push({ type: 'RSI', label: `RSI(${ind.period})`, color: ind.color, value: val, overbought: ind.overbought ?? 70, oversold: ind.oversold ?? 30 });
+        } else if (ind.type === 'EQ') {
+          const eq = eqDataMapRef.current.get(ind.id)?.get(time);
+          if (eq) indValues.push({
+            type: 'EQ', label: `EQ(${ind.lookback ?? 60})`, color: ind.color,
+            value: eq.poc, score: eq.score, val: eq.val, vah: eq.vah,
+            threshold: ind.threshold ?? 70,
+            comps: { pull: eq.pull, uni: eq.uni, conc: eq.conc, flat: eq.flat, sym: eq.sym, prox: eq.prox },
+          });
         }
       }
       setTooltip({ x, y, flipX, time, candle, indValues });
@@ -295,14 +397,27 @@ export default function TradingChart({
       bbSeriesMapRef.current.clear();
       swingSeriesMapRef.current.clear();
       rsiSeriesMapRef.current.clear();
+      eqSeriesMapRef.current.clear();
+      trenderMapRef.current.clear();
       patternSeriesMapRef.current.clear();
       fvgPrimitiveRef.current  = null;
+      rfvgPrimitiveRef.current = null;
+      rfvgPosPrimitiveRef.current = null;
       hbhPrimitiveRef.current  = null;
       hbhbPrimitiveRef.current = null;
+      compressionPrimitiveRef.current = null;
+      tradesPrimitiveRef.current      = null;
+      appliedFocusRef.current         = null;
+      // Le graphe vient d'être détruit : sans cette remise à zéro, un remontage
+      // (StrictMode, ou tout parent qui remonte le composant avec ses bougies
+      // déjà chargées) verrait `candles === prevCandles`, croirait à un simple
+      // ajout live et n'injecterait que la DERNIÈRE bougie dans un graphe vide.
+      prevCandlesRef.current          = null;
       candlesByTimeRef.current.clear();
       maDataMapRef.current.clear();
       bbDataMapRef.current.clear();
       rsiDataMapRef.current.clear();
+      eqDataMapRef.current.clear();
       tradePriceLinesRef.current = [];
       chart.remove();
     };
@@ -439,6 +554,104 @@ export default function TradingChart({
     candlesByTimeRef.current = new Map(candles.map(c => [c.time, c]));
   }, [candles]);
 
+  // ── Trades de backtest : positions + marqueurs d'entrée / sortie ──────────
+  // Les temps d'un trade ne tombent pas sur des temps de bougie : l'entrée est
+  // à l'open d'une bougie TF, mais la sortie est datée à la MINUTE (SL/TP
+  // vérifiés M1 par M1). Or le graphe ne sait placer que des temps présents
+  // dans ses données — chaque temps est donc ramené à la bougie qui le
+  // contient (dernière bougie dont le temps <= t), sans quoi marqueurs et
+  // rectangles seraient silencieusement ignorés.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const hasTrades = backtestTrades.length > 0 && candles?.length > 0;
+
+    if (!hasTrades) {
+      if (tradesPrimitiveRef.current) {
+        try { series.detachPrimitive(tradesPrimitiveRef.current); } catch {}
+        tradesPrimitiveRef.current = null;
+      }
+      series.setMarkers([]);
+      return;
+    }
+
+    const times = candles.map(c => c.time);
+    const snap = (t) => {
+      if (t <= times[0]) return times[0];
+      if (t >= times[times.length - 1]) return times[times.length - 1];
+      let lo = 0, hi = times.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (times[mid] <= t) lo = mid; else hi = mid - 1;
+      }
+      return times[lo];
+    };
+
+    const first = times[0];
+    const last  = times[times.length - 1];
+
+    const visible = [];
+    const markers = [];
+
+    for (const t of backtestTrades) {
+      if (t.exitTime < first || t.entryTime > last) continue;   // hors fenêtre chargée
+      const entryTime = snap(t.entryTime);
+      const exitTime  = snap(t.exitTime);
+      visible.push({ ...t, entryTime, exitTime });
+
+      const isBuy = t.direction === 'BUY';
+      const win   = (t.profitPoints ?? 0) >= 0;
+      markers.push({
+        time: entryTime,
+        position: isBuy ? 'belowBar' : 'aboveBar',
+        shape:    isBuy ? 'arrowUp'  : 'arrowDown',
+        color:    isBuy ? '#26A69A'  : '#EF5350',
+        text:     `#${t.id}`,
+        size:     t.id === selectedTradeId ? 2 : 1,
+      });
+      markers.push({
+        time: exitTime,
+        position: isBuy ? 'aboveBar' : 'belowBar',
+        shape:    'circle',
+        color:    win ? '#26A69A' : '#EF5350',
+        text:     t.profitR != null ? `${t.profitR >= 0 ? '+' : ''}${t.profitR.toFixed(1)}R` : '',
+        size:     t.id === selectedTradeId ? 2 : 1,
+      });
+    }
+
+    markers.sort((a, b) => a.time - b.time);   // LWC exige des marqueurs ordonnés
+
+    if (!tradesPrimitiveRef.current) {
+      tradesPrimitiveRef.current = createTradesPrimitive();
+      series.attachPrimitive(tradesPrimitiveRef.current);
+    }
+    tradesPrimitiveRef.current.update(visible, selectedTradeId);
+    series.setMarkers(markers);
+  }, [backtestTrades, selectedTradeId, candles]);
+
+  // ── Recadrage sur demande (un trade choisi dans la liste) ─────────────────
+  // focusRange est comparé par IDENTITÉ : un prepend d'historique change
+  // `candles` mais ne doit pas re-recadrer, sinon la vue sauterait sous les
+  // doigts de l'utilisateur en train de remonter le temps.
+  // Application SYNCHRONE : l'effet des bougies, déclaré plus haut, a déjà posé
+  // les données de la série sur ce même commit. Différer (requestAnimationFrame)
+  // exposait le recadrage à une course — le préchargement d'historique déclenché
+  // par fitContent() faisait changer `candles`, le nettoyage annulait l'image
+  // différée, et le garde-fou d'identité interdisait toute nouvelle tentative :
+  // le recadrage ne se produisait jamais.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !focusRange || !candles?.length) return;
+    if (appliedFocusRef.current === focusRange) return;
+    try {
+      chart.timeScale().setVisibleRange(focusRange);
+      appliedFocusRef.current = focusRange;
+    } catch {
+      /* plage hors données — on retentera au prochain rendu */
+    }
+  }, [focusRange, candles]);
+
   // ── MA series ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const chart = chartRef.current;
@@ -570,13 +783,7 @@ export default function TradingChart({
           crosshairMarkerVisible: true,
           crosshairMarkerRadius:  3,
           title:                  `RSI(${ind.period})`,
-          // Fixed bounds with internal vertical margin so the line never touches edges.
-          // Force a fixed scale -8 → 108 so the RSI line has ~7% breathing room
-          // above RSI=100 and below RSI=0, and never clips against pane edges.
-          autoscaleInfoProvider: () => ({
-            priceRange: { minValue: -8, maxValue: 108 },
-            margins: { above: 0, below: 0 },
-          }),
+          autoscaleInfoProvider:  OSC_SCALE,
         });
         const ob = ind.overbought ?? 70;
         const os = ind.oversold   ?? 30;
@@ -596,13 +803,232 @@ export default function TradingChart({
     }
   }, [candles, indicators]);
 
+  // ── EQ — Equilibrium Point ────────────────────────────────────────────────
+  // Three layers per indicator: the point itself as a line whose opacity tracks
+  // the balance score, the balance zones / naked POCs as a primitive, and the
+  // score as an optional 0-100 line in the bottom pane.
+  useEffect(() => {
+    const chart  = chartRef.current;
+    const series = candleSeriesRef.current;
+    if (!chart || !series) return;
+
+    const eqInds = indicators.filter(i => i.type === 'EQ');
+    const map    = eqSeriesMapRef.current;
+    const active = new Set(eqInds.map(i => i.id));
+
+    for (const [id, entry] of map) {
+      if (!active.has(id)) {
+        chart.removeSeries(entry.line);
+        if (entry.score) chart.removeSeries(entry.score);
+        try { series.detachPrimitive(entry.prim); } catch {}
+        map.delete(id);
+        eqDataMapRef.current.delete(id);
+      }
+    }
+
+    for (const ind of eqInds) {
+      const lookback  = ind.lookback ?? 60;
+      const showScore = ind.showScore !== false;
+      const title     = `EQ(${lookback})`;
+
+      if (!map.has(ind.id)) {
+        const prim = createEquilibriumPrimitive();
+        series.attachPrimitive(prim);
+        map.set(ind.id, {
+          prim,
+          // Per-point colour carries the score, so the series colour is only a
+          // fallback for the crosshair marker and the price-axis label.
+          line: chart.addLineSeries({
+            color: ind.color, lineWidth: 2,
+            priceLineVisible: false, lastValueVisible: true,
+            crosshairMarkerVisible: true, crosshairMarkerRadius: 3,
+            title,
+          }),
+          score: null,
+        });
+      }
+      const entry = map.get(ind.id);
+      entry.line.applyOptions({ color: ind.color, title });
+
+      // Score sub-series appears / disappears with the toggle.
+      if (showScore && !entry.score) {
+        entry.score = chart.addLineSeries({
+          priceScaleId: 'left',
+          color: ind.color, lineWidth: 1.5,
+          priceLineVisible: false, lastValueVisible: true,
+          crosshairMarkerVisible: true, crosshairMarkerRadius: 3,
+          title: `${title} score`,
+          autoscaleInfoProvider: OSC_SCALE,
+        });
+        entry.thLine = entry.score.createPriceLine({
+          price: ind.threshold ?? 70,
+          color: 'rgba(167,139,250,0.55)',
+          lineStyle: LineStyle.Dashed, lineWidth: 1,
+          title: String(ind.threshold ?? 70),
+        });
+      } else if (!showScore && entry.score) {
+        chart.removeSeries(entry.score);
+        entry.score = null;
+        entry.thLine = null;
+      } else if (entry.score) {
+        entry.score.applyOptions({ color: ind.color, title: `${title} score` });
+        entry.thLine?.applyOptions({
+          price: ind.threshold ?? 70,
+          title: String(ind.threshold ?? 70),
+        });
+      }
+
+      if (!candles?.length || candles.length < lookback + 1) {
+        entry.line.setData([]);
+        entry.score?.setData([]);
+        entry.prim.update({ zones: [], nakedPOCs: [] }, {});
+        eqDataMapRef.current.delete(ind.id);
+        continue;
+      }
+
+      const eq = calcEquilibrium(candles, ind);
+
+      entry.line.setData(eq.line);
+      entry.score?.setData(eq.score);
+      entry.prim.update(
+        { zones: eq.zones, nakedPOCs: eq.nakedPOCs },
+        {
+          color:       ind.color,
+          upColor:     ind.upColor    ?? bullColor,
+          downColor:   ind.downColor  ?? bearColor,
+          nakedColor:  ind.nakedColor ?? '#94A3B8',
+          opacity:     ind.opacity    ?? 0.14,
+          showProfile: ind.showProfile !== false,
+          showNaked:   ind.showNaked   !== false,
+          showBreak:   ind.showBreak   !== false,
+          showLabel:   ind.showLabel   !== false,
+        },
+      );
+      eqDataMapRef.current.set(ind.id, eq.points);
+    }
+  }, [candles, indicators, bullColor, bearColor]);
+
+  // ── TRENDER — Harmonie Multi-HTF ──────────────────────────────────────────
+  // Fond des zones + trait « ≈ SL » par la primitive ; triangles de début et
+  // étiquette du HTF confirmateur par les marqueurs d'une série fantôme ; BB du
+  // timeframe courant en trois lignes optionnelles.
+  useEffect(() => {
+    const chart  = chartRef.current;
+    const series = candleSeriesRef.current;
+    if (!chart || !series) return;
+
+    const trInds = indicators.filter(i => i.type === 'TRENDER');
+    const map    = trenderMapRef.current;
+    const active = new Set(trInds.map(i => i.id));
+    let warn = null;
+
+    for (const [id, e] of map) {
+      if (!active.has(id)) {
+        chart.removeSeries(e.marks);
+        if (e.bb) { chart.removeSeries(e.bb.upper); chart.removeSeries(e.bb.middle); chart.removeSeries(e.bb.lower); }
+        try { series.detachPrimitive(e.prim); } catch {}
+        map.delete(id);
+      }
+    }
+
+    for (const ind of trInds) {
+      if (!map.has(ind.id)) {
+        const prim = createHarmonyPrimitive();
+        series.attachPrimitive(prim);
+        map.set(ind.id, {
+          prim,
+          marks: chart.addLineSeries({
+            color: 'rgba(0,0,0,0)', lineWidth: 0,
+            priceLineVisible: false, lastValueVisible: false,
+            crosshairMarkerVisible: false, title: '',
+          }),
+          bb: null,
+        });
+      }
+      const e = map.get(ind.id);
+
+      const bull = ind.bullColor ?? '#26A69A';
+      const bear = ind.bearColor ?? '#EF5350';
+
+      // Bandes de Bollinger du timeframe courant (réglages séparés du biais HTF)
+      const showBbCur = ind.showBbCur !== false;
+      if (showBbCur && !e.bb) {
+        const c = ind.bbCurColor ?? '#60A5FA';
+        e.bb = {
+          upper:  chart.addLineSeries({ color: c, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: '' }),
+          middle: chart.addLineSeries({ color: c + '70', lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: '' }),
+          lower:  chart.addLineSeries({ color: c, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: '' }),
+        };
+      } else if (!showBbCur && e.bb) {
+        chart.removeSeries(e.bb.upper); chart.removeSeries(e.bb.middle); chart.removeSeries(e.bb.lower);
+        e.bb = null;
+      } else if (e.bb) {
+        const c = ind.bbCurColor ?? '#60A5FA';
+        e.bb.upper.applyOptions({ color: c });
+        e.bb.middle.applyOptions({ color: c + '70' });
+        e.bb.lower.applyOptions({ color: c });
+      }
+
+      if (!candles?.length) {
+        e.prim.update([], {});
+        e.marks.setData([]); e.marks.setMarkers([]);
+        e.bb?.upper.setData([]); e.bb?.middle.setData([]); e.bb?.lower.setData([]);
+        continue;
+      }
+
+      const { zones, warmup } = calcHarmony(candles, ind, htfBars);
+      warn = warn ?? (warmup?.ok === false ? warmup : null);
+
+      e.prim.update(zones, {
+        bullColor: bull,
+        bearColor: bear,
+        slColor:   ind.slColor  ?? '#EF5350',
+        bgTransp:  ind.bgTransp ?? 80,
+        showBg:    ind.showBg   !== false,
+        showSlLn:  ind.showSlLn !== false,
+      });
+
+      // Triangle au début de chaque zone, texte = le ou les HTF confirmateurs
+      // (ceux qui ont basculé sur cette bougie et complété l'harmonie).
+      if (ind.showMark !== false) {
+        const showConf = ind.showConf !== false;
+        e.marks.setData(zones.map(z => ({ time: z.startTime, value: z.side === 'bull' ? candles[z.startIdx].low : candles[z.startIdx].high })));
+        e.marks.setMarkers(zones.map(z => ({
+          time:     z.startTime,
+          position: z.side === 'bull' ? 'belowBar' : 'aboveBar',
+          color:    z.side === 'bull' ? bull : bear,
+          shape:    z.side === 'bull' ? 'arrowUp' : 'arrowDown',
+          text:     showConf ? (z.confirm.join(' + ') || '—') : '',
+          size:     1,
+        })));
+      } else {
+        e.marks.setData([]); e.marks.setMarkers([]);
+      }
+
+      if (e.bb) {
+        const { upper, middle, lower } = calcBB(candles, {
+          period: ind.bbCurLen ?? 50,
+          stdDev: ind.bbCurMult ?? 0.369,
+          offset: 0,
+          source: 'close',
+        });
+        e.bb.upper.setData(upper);
+        e.bb.middle.setData(middle);
+        e.bb.lower.setData(lower);
+      }
+    }
+
+    setTrenderWarmup(trInds.length ? warn : null);
+  }, [candles, indicators, htfBars]);
+
   // ── Pattern markers ───────────────────────────────────────────────────────
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
 
-    // Zone patterns (FVG, HBH/BHB, HBHB/BHBH, COMPRESSION) are handled by their own primitive effects.
-    const active = patterns.filter(p => p.enabled && p.type !== 'FVG' && p.type !== 'HBH_BHB' && p.type !== 'HBHB_BHBH' && p.type !== 'COMPRESSION');
+    // Zone patterns (FVG, rFVG, HBH/BHB, HBHB/BHBH, COMPRESSION) draw rectangles
+    // through their own primitive effects below — only marker patterns land here.
+    const active = patterns.filter(p => p.enabled && p.render !== 'zone');
     const map    = patternSeriesMapRef.current;
     const activeTypes = new Set(active.map(p => p.type));
 
@@ -639,10 +1065,10 @@ export default function TradingChart({
       let detected = [];
       if (pat.type === 'TWINS_BARS') {
         detected = calcTwinsBars(candles, {
-          direction: pat.direction ?? 'both',
-          lookback:  pat.lookback  ?? 4,
-          atrPeriod: pat.atrPeriod ?? 7,
-          atrMult:   pat.atrMult   ?? 1.6,
+          direction:       pat.direction       ?? 'both',
+          atrPeriod:       pat.atrPeriod       ?? 7,
+          atrMult:         pat.atrMult         ?? 1.6,
+          similarityRatio: pat.similarityRatio ?? 0.7,
         });
       }
 
@@ -690,6 +1116,10 @@ export default function TradingChart({
       showMitigated: fvg.showMitigated !== false,
       showInverse:   fvg.showInverse   !== false,
       maxLen:        fvg.maxLen ?? 0,
+      minPts:        fvg.minPts    ?? 0,
+      atrPeriod:     fvg.atrPeriod ?? 14,
+      atrMin:        fvg.atrMin    ?? 0,
+      atrMax:        fvg.atrMax    ?? 0,
     });
 
     fvgPrimitiveRef.current.update(zones, {
@@ -697,8 +1127,165 @@ export default function TradingChart({
       bearColor: fvg.bearColor ?? '#EF5350',
       opacity:   fvg.opacity   ?? 0.18,
       showLabel: fvg.showLabel !== false,
+      labelText: 'FVG',
     });
   }, [candles, patterns]);
+
+  // ── rFVG zones (même primitive que le FVG, autre détection) ────────────────
+  // Deux habits, cumulables : la zone classique, et/ou la position simulée
+  // (pré-entrée à la clôture de la 3e bougie, SL/TP en points, expiration avec
+  // la zone) rendue par la même primitive que les trades du backtest.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const rfvg = patterns.find(p => p.type === 'RFVG' && p.enabled);
+
+    const dropZones = () => {
+      if (rfvgPrimitiveRef.current) {
+        try { series.detachPrimitive(rfvgPrimitiveRef.current); } catch {}
+        rfvgPrimitiveRef.current = null;
+      }
+    };
+    const dropPositions = () => {
+      if (rfvgPosPrimitiveRef.current) {
+        try { series.detachPrimitive(rfvgPosPrimitiveRef.current); } catch {}
+        rfvgPosPrimitiveRef.current = null;
+      }
+    };
+
+    if (!rfvg || !candles?.length) { dropZones(); dropPositions(); setRfvgStats(null); rfvgReportRef.current = null; return; }
+
+    const display = rfvg.display ?? 'zone';
+    const detectOpts = {
+      mode:      rfvg.mode      ?? 'rfvg',
+      direction: rfvg.direction ?? 'both',
+      minPts:    rfvg.minPts    ?? 0,
+      maPeriod:  rfvg.maPeriod  ?? 50,
+      atrPeriod: rfvg.atrPeriod ?? 14,
+      atrMult:   rfvg.atrMult   ?? 1.5,
+      sizeMode:  rfvg.sizeMode  ?? 'range',
+      extLen:    rfvg.extLen    ?? 20,
+    };
+
+    if (display === 'position') {
+      dropZones();
+    } else {
+      if (!rfvgPrimitiveRef.current) {
+        rfvgPrimitiveRef.current = createFvgPrimitive();
+        series.attachPrimitive(rfvgPrimitiveRef.current);
+      }
+      rfvgPrimitiveRef.current.update(calcRFVG(candles, detectOpts), {
+        bullColor: rfvg.bullColor ?? '#26A69A',
+        bearColor: rfvg.bearColor ?? '#EF5350',
+        opacity:   rfvg.opacity   ?? 0.18,
+        showLabel: rfvg.showLabel !== false,
+        labelText: 'rFVG',
+      });
+    }
+
+    if (display === 'zone') {
+      dropPositions();
+      setRfvgStats(null);
+      rfvgReportRef.current = null;
+    } else {
+      if (!rfvgPosPrimitiveRef.current) {
+        rfvgPosPrimitiveRef.current = createTradesPrimitive();
+        series.attachPrimitive(rfvgPosPrimitiveRef.current);
+      }
+      const slPts        = rfvg.slPts        ?? 10;
+      const tpPts        = rfvg.tpPts        ?? 10;
+      const beTriggerPts = rfvg.beTriggerPts ?? 0;
+      const beLevelPts   = rfvg.beLevelPts   ?? 0;
+      const posOpts = {
+        ...detectOpts,
+        slPts, tpPts,
+        expiry: rfvg.expiry ?? 20,
+        beTriggerPts, beLevelPts,
+      };
+      const positions = calcRFVGPositions(candles, posOpts);
+      rfvgPosPrimitiveRef.current.update(positions, null);
+
+      // Le moniteur suit le même calcul que le dessin : il se met à jour tout
+      // seul à chaque chargement de bougies (préchargement d'historique inclus).
+      let tp = 0, sl = 0, be = 0, missed = 0, open = 0;
+      for (const p of positions) {
+        if      (p.status === 'tp')     tp++;
+        else if (p.status === 'sl')     sl++;
+        else if (p.status === 'be')     be++;
+        else if (p.status === 'missed') missed++;
+        else                            open++;
+      }
+      setRfvgStats({ total: positions.length, tp, sl, be, missed, open, slPts, tpPts, beOn: beTriggerPts > 0 });
+      rfvgReportRef.current = {
+        params: posOpts,
+        stats:  { total: positions.length, tp, sl, be, missed, open },
+        positions,
+      };
+    }
+  }, [candles, patterns]);
+
+  // Rapport JSON des positions rFVG : recap + excursions (max pullup / max
+  // drawdown) par position, pour étudier où placer trailing et break-even.
+  const downloadRfvgReport = useCallback(() => {
+    const rep = rfvgReportRef.current;
+    if (!rep) return;
+    const { params, stats, positions } = rep;
+    const iso = t => t != null ? new Date(t * 1000).toISOString() : null;
+    const r   = pts => pts != null && params.slPts > 0 ? +(pts / params.slPts).toFixed(4) : null;
+
+    const resolved = stats.tp + stats.sl;
+    const doc = {
+      pattern:     'rFVG — positions simulées (pré-entrée limite à la clôture de la 3e bougie)',
+      generatedAt: new Date().toISOString(),
+      params,
+      stats: {
+        ...stats,
+        winrate: resolved > 0 ? +(stats.tp / resolved).toFixed(4) : null,
+        rr:      params.slPts > 0 ? +(params.tpPts / params.slPts).toFixed(4) : null,
+      },
+      conventions: {
+        unites:        'excursions en points et en R (points / SL)',
+        maxPullupPts:  "MFE — plus forte avancée dans le sens de la position, du remplissage à la sortie ; bougie de sortie EXCLUE pour une sortie sur stop ('sl' ou 'be') ; plafonnée au TP",
+        maxDrawdownPts:'MAE — plus forte avancée contre la position, bougie de sortie incluse (pessimiste), plafonnée au SL',
+        remplissage:   "l'ordre limite n'est pris que si une bougie revient toucher le niveau avant l'expiration ; status 'missed' = jamais pris",
+        ambiguite:     'stop et TP touchés dans la même bougie : le stop gagne (pessimiste)',
+        breakEven:     "beTriggerPts > 0 : dès que le profit atteint le seuil, stop déplacé à entrée ± beLevelPts ; status 'be' = sortie sur ce stop ; stop et TP testés avant l'activation, sortie au BE si la bougie d'activation a aussi traversé le niveau ; un stop traversé en gap est rempli au pire de l'open",
+      },
+      positions: positions.map(p => ({
+        id:             p.id,
+        label:          p.label,
+        direction:      p.direction,
+        status:         p.status,
+        beActivated:    p.beActivated ?? false,
+        beDate:         iso(p.beTime),
+        entryTime:      p.entryTime,
+        entryDate:      iso(p.entryTime),
+        fillDate:       iso(p.fillTime),
+        exitDate:       iso(p.exitTime),
+        barsToFill:     p.barsToFill,
+        barsHeld:       p.barsHeld,
+        entryPrice:     p.entryPrice,
+        exitPrice:      p.exitPrice,
+        sl:             p.sl,
+        tp:             p.tp,
+        profitPoints:   +p.profitPoints.toFixed(6),
+        profitR:        r(p.profitPoints),
+        maxPullupPts:   p.maxPullupPts   != null ? +p.maxPullupPts.toFixed(6)   : null,
+        maxPullupR:     r(p.maxPullupPts),
+        maxDrawdownPts: p.maxDrawdownPts != null ? +p.maxDrawdownPts.toFixed(6) : null,
+        maxDrawdownR:   r(p.maxDrawdownPts),
+      })),
+    };
+
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `rfvg-rapport-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   // ── HBH / BHB zones (rectangles via series primitive) ──────────────────────
   useEffect(() => {
@@ -864,6 +1451,139 @@ export default function TradingChart({
           {shotState === 'copied' ? 'Copié' : shotState === 'error' ? 'Échec' : 'Capture'}
         </button>
 
+        {/* Rapport JSON des positions rFVG — le clic lit rfvgReportRef, mis à
+            jour par l'effet à chaque chargement de bougies : toujours à jour. */}
+        {rfvgStats && (
+          <button
+            onClick={downloadRfvgReport}
+            title="Télécharger le rapport JSON des positions rFVG (recap, max pullup, max drawdown)"
+            aria-label="Télécharger le rapport des positions rFVG"
+            style={{
+              position: 'absolute', top: 10, right: 118, zIndex: 11,
+              display: 'flex', alignItems: 'center', gap: 6,
+              height: 30, padding: '0 11px',
+              borderRadius: 999,
+              border: '1px solid rgba(251,146,60,0.4)',
+              background: 'rgba(13,18,32,0.72)',
+              color: '#FB923C',
+              cursor: 'pointer',
+              fontSize: 11, fontWeight: 700, fontFamily: 'Inter, system-ui, sans-serif',
+              letterSpacing: '0.03em',
+              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M12 15V3" />
+            </svg>
+            Rapports
+          </button>
+        )}
+
+        {/* Moniteur rFVG : stats des positions simulées sur les bougies
+            chargées. Alimenté par l'effet rFVG, donc recalculé automatiquement
+            à chaque chargement. Winrate sur les positions résolues (TP + SL),
+            comparé au seuil de rentabilité du RR : au-dessus vert, en dessous
+            rouge. */}
+        {rfvgStats && (() => {
+          const { total, tp, sl, be = 0, missed, open, slPts, tpPts, beOn = false } = rfvgStats;
+          const showBe = beOn || be > 0;
+          const rr       = slPts > 0 ? tpPts / slPts : null;
+          const resolved = tp + sl;
+          const wr       = resolved > 0 ? tp / resolved : null;
+          const beThresh = rr != null ? 1 / (1 + rr) : null;
+          const wrColor  = wr == null || beThresh == null ? '#94A3B8' : wr >= beThresh ? '#26A69A' : '#EF5350';
+          const row = { display: 'flex', justifyContent: 'space-between', gap: 14, fontSize: 11, lineHeight: '15px' };
+          const key = { color: 'rgba(148,163,184,0.85)', fontWeight: 500 };
+          return (
+            <div
+              style={{
+                position: 'absolute', top: 10, left: 14, zIndex: 11,
+                display: 'flex', flexDirection: 'column', gap: 3,
+                minWidth: 172, padding: '9px 12px 10px', borderRadius: 10,
+                border: '1px solid rgba(251,146,60,0.35)',
+                background: 'rgba(13,18,32,0.78)',
+                backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                color: '#E2E8F0', fontFamily: 'Inter, system-ui, sans-serif',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
+                pointerEvents: 'none',
+              }}
+            >
+              <div style={{ ...row, marginBottom: 3 }}>
+                <span style={{ color: '#FB923C', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em' }}>
+                  rFVG — POSITIONS
+                </span>
+                <span style={{ color: 'rgba(148,163,184,0.85)', fontWeight: 600 }}>{total}</span>
+              </div>
+              <div style={row}>
+                <span style={key}>{showBe ? 'TP / BE / SL' : 'TP / SL'}</span>
+                <span style={{ fontWeight: 700 }}>
+                  <span style={{ color: '#26A69A' }}>{tp}</span>
+                  {showBe && (
+                    <>
+                      <span style={{ color: 'rgba(148,163,184,0.6)' }}> / </span>
+                      <span style={{ color: '#F59E0B' }}>{be}</span>
+                    </>
+                  )}
+                  <span style={{ color: 'rgba(148,163,184,0.6)' }}> / </span>
+                  <span style={{ color: '#EF5350' }}>{sl}</span>
+                </span>
+              </div>
+              <div style={row}>
+                <span style={key}>Winrate</span>
+                <span style={{ color: wrColor, fontWeight: 700 }}>
+                  {wr == null ? '—' : `${(wr * 100).toFixed(1)} %`}
+                </span>
+              </div>
+              <div style={row}>
+                <span style={key}>RR (seuil BE)</span>
+                <span style={{ fontWeight: 600 }}>
+                  {rr == null ? '—' : rr.toFixed(2)}
+                  {beThresh != null && (
+                    <span style={{ color: 'rgba(148,163,184,0.7)', fontWeight: 500 }}> ({(beThresh * 100).toFixed(0)} %)</span>
+                  )}
+                </span>
+              </div>
+              {(missed > 0 || open > 0) && (
+                <div style={row}>
+                  <span style={key}>Ratées / ouvertes</span>
+                  <span style={{ color: '#94A3B8', fontWeight: 600 }}>{missed} / {open}</span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* TRENDER : historique HTF insuffisant. L'harmonie stricte exige les 3
+            HTF alignés ; tant que la Bollinger du plus lent n'a pas démarré, sa
+            tendance vaut 0 et AUCUNE zone ne peut exister. Sans ce message, le
+            graphe reste vide sans raison apparente. */}
+        {trenderWarmup && (
+          <div
+            style={{
+              position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 12, display: 'flex', alignItems: 'center', gap: 8,
+              padding: '7px 13px', borderRadius: 999,
+              border: '1px solid rgba(245,158,11,0.4)',
+              background: 'rgba(20,15,5,0.88)',
+              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+              color: '#FCD34D', fontSize: 11.5, fontWeight: 600,
+              fontFamily: 'Inter, system-ui, sans-serif',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
+            }}
+          >
+            <span style={{ fontSize: 13 }}>⚠</span>
+            <span>
+              TRENDER — historique insuffisant en {trenderWarmup.htf} :{' '}
+              <strong>{trenderWarmup.have}</strong> bougies chargées sur{' '}
+              <strong>{trenderWarmup.need}</strong>. Fais défiler vers la gauche pour en charger,
+              ou choisis une unité de temps plus courte.
+            </span>
+          </div>
+        )}
+
         {/* RSI area overlay: darkens + suppresses grid lines via backdrop-filter.
             Placed ABOVE canvas (z-index 1) with pointer-events off.
             brightness(0.38) makes grid lines nearly invisible on the dark bg. */}
@@ -987,7 +1707,9 @@ export default function TradingChart({
           {tooltip.indValues.length > 0 && (
             <>
               <hr className={styles.ttDivider} />
-              {tooltip.indValues.map((iv, i) => (
+              {tooltip.indValues.map((iv, i) => iv.type === 'EQ' ? (
+                <EqTooltip key={i} iv={iv} />
+              ) : (
                 <div key={i} className={styles.indRow}>
                   <span className={styles.indDot} style={{ background: iv.color }} />
                   <span className={styles.indLabel}>{iv.label}</span>

@@ -93,6 +93,20 @@
   margin-bottom: 10px;
 }
 
+.blockActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rowClickable {
+  cursor: pointer;
+}
+
+.rowClickable:hover td {
+  background: var(--surface-2);
+}
+
 .blockTitle {
   font-size: 10px;
   font-weight: 700;

@@ -9,8 +9,11 @@
 // Usage:
 //   const p = createFvgPrimitive();
 //   candleSeries.attachPrimitive(p);
-//   p.update(zones, { bullColor, bearColor, opacity, showLabel });
+//   p.update(zones, { bullColor, bearColor, opacity, showLabel, labelText });
 //   candleSeries.detachPrimitive(p);
+//
+// Any gap family sharing the FVG zone shape ({ side, state, top, bottom,
+// startTime, endTime }) can reuse it — the rFVG does, via labelText.
 
 const GREY = '#64748B'; // mitigated / consumed gaps
 
@@ -27,10 +30,13 @@ function zoneColor(zone, opts) {
   return zone.side === 'bull' ? opts.bullColor : opts.bearColor;
 }
 
-function zoneLabel(zone) {
-  if (zone.state === 'inverse')   return 'iFVG';
+// A zone may name itself (rFVG zones do — 'rFVG' or 'aFVG' depending on the mode);
+// otherwise labelText names the family. An inverted gap gets the 'i' prefix.
+function zoneLabel(zone, opts) {
+  const base = zone.label ?? opts.labelText ?? 'FVG';
+  if (zone.state === 'inverse')   return `i${base}`;
   if (zone.state === 'mitigated') return '';      // keep greyed gaps unlabelled (less noise)
-  return 'FVG';
+  return base;
 }
 
 class FvgRenderer {
@@ -113,7 +119,7 @@ class FvgPaneView {
         yTop, yBottom,
         color: zoneColor(z, opts),
         state: z.state,
-        label: zoneLabel(z),
+        label: zoneLabel(z, opts),
       });
     }
 
@@ -133,7 +139,7 @@ class FvgPrimitive {
     this._series = null;
     this._requestUpdate = null;
     this._zones = [];
-    this._opts = { bullColor: '#26A69A', bearColor: '#EF5350', opacity: 0.18, showLabel: true };
+    this._opts = { bullColor: '#26A69A', bearColor: '#EF5350', opacity: 0.18, showLabel: true, labelText: 'FVG' };
     this._paneViews = [new FvgPaneView(this)];
   }
 

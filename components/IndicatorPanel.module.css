@@ -203,6 +203,17 @@
 }
 
 /* ── Form fields ─────────────────────────────────────────────────── */
+.hint {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 .field {
   display: flex;
   flex-direction: column;

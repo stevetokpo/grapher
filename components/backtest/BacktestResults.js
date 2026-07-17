@@ -86,7 +86,7 @@ function BreakdownTable({ title, rows, keyLabel, keyFmt = k => k }) {
   );
 }
 
-export default function BacktestResults({ results }) {
+export default function BacktestResults({ results, onOpenChart }) {
   const [equityUnit, setEquityUnit] = useState('r');
   const [showTrades, setShowTrades] = useState(false);
 
@@ -186,9 +186,16 @@ export default function BacktestResults({ results }) {
               <h3 className={styles.blockTitle}>
                 Trades {tradesCapped && <span className={styles.metaWarn}>(5000 derniers)</span>}
               </h3>
-              <button className={styles.segBtn} onClick={() => setShowTrades(v => !v)}>
-                {showTrades ? 'Masquer' : `Afficher (${trades.length})`}
-              </button>
+              <div className={styles.blockActions}>
+                {onOpenChart && trades.length > 0 && (
+                  <button className={styles.segBtn} onClick={() => onOpenChart(trades[0])}>
+                    Voir sur le graphe
+                  </button>
+                )}
+                <button className={styles.segBtn} onClick={() => setShowTrades(v => !v)}>
+                  {showTrades ? 'Masquer' : `Afficher (${trades.length})`}
+                </button>
+              </div>
             </div>
 
             {showTrades && (
@@ -203,7 +210,12 @@ export default function BacktestResults({ results }) {
                   </thead>
                   <tbody>
                     {trades.map(t => (
-                      <tr key={t.id}>
+                      <tr
+                        key={t.id}
+                        className={onOpenChart ? styles.rowClickable : undefined}
+                        onClick={onOpenChart ? () => onOpenChart(t) : undefined}
+                        title={onOpenChart ? 'Voir ce trade sur le graphe' : undefined}
+                      >
                         <td className={styles.mono}>{t.id}</td>
                         <td style={{ color: t.direction === 'BUY' ? 'var(--bull)' : 'var(--bear)', fontWeight: 700 }}>
                           {t.direction}

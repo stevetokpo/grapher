@@ -11,14 +11,13 @@ export const PATTERN_TYPES = [
   {
     type:      'TWINS_BARS',
     label:     'Twins Bars',
-    desc:      'Corps plein, taille similaire (ratio configurable), précédées par bougies à mèches',
+    desc:      'Deux bougies opposées à corps plein, de taille similaire et large vs ATR',
     color:     '#A78BFA',
     direction: 'both',
     bullColor: '#26A69A',
     bearColor: '#EF5350',
     showLabel: true,
     markerSize: 1,
-    lookback:        4,
     similarityRatio: 0.7,
     atrPeriod:       7,
     atrMult:         1.6,
@@ -37,6 +36,37 @@ export const PATTERN_TYPES = [
     showInverse:   true,
     showLabel:     true,
     maxLen:        0,
+    // Filtres portés de pines/trender.pine (désactivés par défaut)
+    minPts:        0,
+    atrPeriod:     14,
+    atrMin:        0,
+    atrMax:        0,
+  },
+  {
+    type:      'RFVG',
+    label:     'rFVG / aFVG',
+    desc:      'Gap laissé par une bougie large — à contre-courant de la MM50 (rFVG), ou partout (aFVG)',
+    color:     '#FB923C',
+    render:    'zone',
+    mode:      'rfvg',
+    direction: 'both',
+    bullColor: '#26A69A',
+    bearColor: '#EF5350',
+    opacity:   0.18,
+    showLabel: true,
+    minPts:    0,
+    maPeriod:  50,
+    atrPeriod: 14,
+    atrMult:   1.5,
+    sizeMode:  'range',
+    extLen:    20,
+    // Mode « position » : pré-entrée à la clôture de la 3e bougie du motif
+    display:      'zone',
+    slPts:        10,
+    tpPts:        10,
+    expiry:       20,
+    beTriggerPts: 0,
+    beLevelPts:   0,
   },
   {
     type:      'HBH_BHB',
@@ -297,20 +327,6 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
               0.7 = le plus petit corps doit faire ≥ 70 % du plus grand. Plus élevé = jumeaux plus proches.
             </p>
 
-            <div className={styles.sectionDivider}>Filtre compression</div>
-
-            <div className={styles.field}>
-              <span className={styles.label}>Bougies à mèches avant (0 = désactivé)</span>
-              <NumInput
-                value={form.lookback ?? 4}
-                min={0} max={20} step={1}
-                onChange={v => setF({ lookback: v })}
-              />
-            </div>
-            <p className={styles.hint}>
-              Chaque bougie doit être à mèches dominantes : corps &lt; mèche haute + mèche basse.
-            </p>
-
             <div className={styles.sectionDivider}>Filtre taille ATR</div>
 
             <div className={styles.fieldRow}>
@@ -326,13 +342,14 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
                 <span className={styles.label}>Multiplicateur ATR</span>
                 <NumInput
                   value={form.atrMult ?? 1.6}
-                  min={1.6} max={5} step={0.1}
+                  min={0.1} max={5} step={0.1}
                   onChange={v => setF({ atrMult: v })}
                 />
               </div>
             </div>
             <p className={styles.hint}>
-              Les deux corps TB doivent dépasser ATR(période) × multiplicateur.
+              Les deux corps TB doivent dépasser ATR(période) × multiplicateur. Plus bas = plus de
+              signaux ; mettre la période à 0 désactive le filtre.
             </p>
 
             <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
@@ -419,13 +436,311 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
               </div>
             </div>
 
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <span className={styles.label}>Étirement max (barres, 0 = illimité)</span>
+                <NumInput
+                  value={form.maxLen ?? 0}
+                  min={0} max={500} step={1}
+                  onChange={v => setF({ maxLen: v })}
+                />
+              </div>
+              <div className={styles.field}>
+                <span className={styles.label}>Gap minimum (points, 0 = tous)</span>
+                <NumInput
+                  value={form.minPts ?? 0}
+                  min={0} max={100000} step={0.1}
+                  onChange={v => setF({ minPts: v })}
+                />
+              </div>
+            </div>
+
+            {/* Filtre ATR sur la bougie centrale — celle qui creuse le gap.
+                Écarte à la fois les gaps laissés par une bougie insignifiante et
+                ceux laissés par un pic. 0 = borne désactivée. */}
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <span className={styles.label}>ATR — période</span>
+                <NumInput
+                  value={form.atrPeriod ?? 14}
+                  min={1} max={200} step={1}
+                  onChange={v => setF({ atrPeriod: v })}
+                />
+              </div>
+              <div className={styles.field}>
+                <span className={styles.label}>Bougie centrale ≥ ATR × (0 = off)</span>
+                <NumInput
+                  value={form.atrMin ?? 0}
+                  min={0} max={20} step={0.1}
+                  onChange={v => setF({ atrMin: v })}
+                />
+              </div>
+            </div>
+
             <div className={styles.field}>
-              <span className={styles.label}>Étirement max (barres, 0 = illimité)</span>
+              <span className={styles.label}>Bougie centrale ≤ ATR × (0 = off)</span>
               <NumInput
-                value={form.maxLen ?? 0}
-                min={0} max={500} step={1}
-                onChange={v => setF({ maxLen: v })}
+                value={form.atrMax ?? 0}
+                min={0} max={20} step={0.1}
+                onChange={v => setF({ atrMax: v })}
               />
+            </div>
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {editingType === 'RFVG' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>gap laissé par une bougie large</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <p className={styles.hint}>
+              Motif de base : une bougie baissière (ou haussière) d'une taille ≥ x × ATR, laissant un
+              gap entre la bougie précédente et la suivante.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Motifs retenus</span>
+              <div className={styles.segmented}>
+                {[
+                  { value: 'rfvg', label: 'Seuls les rFVG' },
+                  { value: 'all',  label: 'Toutes (aFVG)' },
+                ].map(o => (
+                  <button
+                    key={o.value}
+                    className={`${styles.segBtn}${(form.mode ?? 'rfvg') === o.value ? ` ${styles.segBtnActive}` : ''}`}
+                    onClick={() => setF({ mode: o.value })}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className={styles.hint}>
+              <b>rFVG</b> : la bougie doit en plus être entièrement du côté opposé à son sens par rapport
+              à la MM (baissière au-dessus, haussière en dessous) — c'est le motif de retournement.
+              <b> aFVG</b> : la MM n'est plus regardée, tout motif de base compte (les rFVG en font partie).
+              Chaque zone est étiquetée selon ce qu'elle est vraiment.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Direction</span>
+              <div className={styles.segmented}>
+                {[
+                  { value: 'bull', label: '↑ Haussier' },
+                  { value: 'both', label: '↕ Les deux' },
+                  { value: 'bear', label: '↓ Baissier' },
+                ].map(o => (
+                  <button
+                    key={o.value}
+                    className={`${styles.segBtn}${form.direction === o.value ? ` ${styles.segBtnActive}` : ''}`}
+                    onClick={() => setF({ direction: o.value })}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.label} style={{ color: '#26A69A' }}>Couleur haussière</span>
+              <Swatches value={form.bullColor ?? '#26A69A'} onChange={c => setF({ bullColor: c })} />
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.label} style={{ color: '#EF5350' }}>Couleur baissière</span>
+              <Swatches value={form.bearColor ?? '#EF5350'} onChange={c => setF({ bearColor: c })} />
+            </div>
+
+            <div className={styles.sectionDivider}>Bougie centrale</div>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Période MM simple</span>
+              <NumInput
+                value={form.maPeriod ?? 50}
+                min={2} max={400} step={1}
+                onChange={v => setF({ maPeriod: v })}
+              />
+            </div>
+            <p className={styles.hint}>
+              La bougie doit être entièrement d'un côté : son plus bas au-dessus de la MM (baissier),
+              son plus haut en dessous (haussier). Elle ne touche jamais la moyenne. En mode
+              « Toutes », la MM ne filtre plus rien mais sert encore à étiqueter les zones.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Mesure de la taille</span>
+              <div className={styles.segmented}>
+                {[
+                  { value: 'range', label: 'Amplitude (H−B)' },
+                  { value: 'body',  label: 'Corps (|C−O|)' },
+                ].map(o => (
+                  <button
+                    key={o.value}
+                    className={`${styles.segBtn}${(form.sizeMode ?? 'range') === o.value ? ` ${styles.segBtnActive}` : ''}`}
+                    onClick={() => setF({ sizeMode: o.value })}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <span className={styles.label}>Période ATR</span>
+                <NumInput
+                  value={form.atrPeriod ?? 14}
+                  min={1} max={200} step={1}
+                  onChange={v => setF({ atrPeriod: v })}
+                />
+              </div>
+              <div className={styles.field}>
+                <span className={styles.label}>Taille ≥ ATR × (0 = off)</span>
+                <NumInput
+                  value={form.atrMult ?? 1.5}
+                  min={0} max={20} step={0.1}
+                  onChange={v => setF({ atrMult: v })}
+                />
+              </div>
+            </div>
+            <p className={styles.hint}>
+              L'ATR est lu sur la bougie qui précède, sinon il contiendrait déjà la bougie à qualifier.
+              Plus haut = déplacements plus violents, moins de signaux.
+            </p>
+
+            <div className={styles.sectionDivider}>Affichage</div>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Représentation</span>
+              <div className={styles.segmented}>
+                {[
+                  { value: 'zone',     label: 'Zone' },
+                  { value: 'position', label: 'Position' },
+                  { value: 'both',     label: 'Les deux' },
+                ].map(o => (
+                  <button
+                    key={o.value}
+                    className={`${styles.segBtn}${(form.display ?? 'zone') === o.value ? ` ${styles.segBtnActive}` : ''}`}
+                    onClick={() => setF({ display: o.value })}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {(form.display ?? 'zone') !== 'zone' && (
+              <>
+                <p className={styles.hint}>
+                  Pré-entrée posée à la clôture de la 3e bougie du motif (achat sur zone haussière,
+                  vente sur baissière), SL et TP en points de part et d'autre. L'ordre n'est pris
+                  que si une bougie suivante revient toucher le niveau ; sinon il expire avec la
+                  zone. Une fois pris, la position court jusqu'au TP ou au SL, même au-delà de la
+                  zone (SL et TP dans la même bougie : le SL gagne, pessimiste). Le trait épais au
+                  milieu donne l'issue : <b>vert</b> TP, <b>rouge</b> SL, <b>gris</b> jamais prise.
+                </p>
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>SL (points)</span>
+                    <NumInput
+                      value={form.slPts ?? 10}
+                      min={0.1} max={100000} step={0.1}
+                      onChange={v => setF({ slPts: v })}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>TP (points)</span>
+                    <NumInput
+                      value={form.tpPts ?? 10}
+                      min={0.1} max={100000} step={0.1}
+                      onChange={v => setF({ tpPts: v })}
+                    />
+                  </div>
+                </div>
+                <div className={styles.field}>
+                  <span className={styles.label}>Expiration de l'ordre (barres, comme la longueur de zone)</span>
+                  <NumInput
+                    value={form.expiry ?? 20}
+                    min={1} max={500} step={1}
+                    onChange={v => setF({ expiry: v })}
+                  />
+                </div>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>BE : seuil d'activation (points, 0 = off)</span>
+                    <NumInput
+                      value={form.beTriggerPts ?? 0}
+                      min={0} max={100000} step={0.1}
+                      onChange={v => setF({ beTriggerPts: v })}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>BE : niveau (points vs entrée)</span>
+                    <NumInput
+                      value={form.beLevelPts ?? 0}
+                      min={-100000} max={100000} step={0.1}
+                      onChange={v => setF({ beLevelPts: v })}
+                    />
+                  </div>
+                </div>
+                <p className={styles.hint}>
+                  Dès que le profit atteint le seuil, le stop est déplacé à entrée ± niveau
+                  (0 = entrée exacte, positif = gain verrouillé, négatif = perte réduite —
+                  le niveau doit rester sous le seuil). Sortie sur ce stop déplacé :
+                  trait <b style={{ color: '#F59E0B' }}>ambre</b>. Pessimiste : stop et TP testés
+                  avant l'activation, et un stop traversé en gap est rempli au pire de l'open.
+                </p>
+              </>
+            )}
+
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <span className={styles.label}>Extension max (barres)</span>
+                <NumInput
+                  value={form.extLen ?? 20}
+                  min={1} max={500} step={1}
+                  onChange={v => setF({ extLen: v })}
+                />
+              </div>
+              <div className={styles.field}>
+                <span className={styles.label}>Gap minimum (points, 0 = tous)</span>
+                <NumInput
+                  value={form.minPts ?? 0}
+                  min={0} max={100000} step={0.1}
+                  onChange={v => setF({ minPts: v })}
+                />
+              </div>
+            </div>
+            <p className={styles.hint}>
+              La zone est tirée à droite sur ce nombre de barres puis coupée net.
+            </p>
+
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <span className={styles.label}>Opacité</span>
+                <NumInput
+                  value={form.opacity ?? 0.18}
+                  min={0.05} max={0.6} step={0.01}
+                  onChange={v => setF({ opacity: v })}
+                />
+              </div>
+              <div className={styles.field}>
+                <span className={styles.label}>Labels</span>
+                <button
+                  className={`${styles.toggleBtn}${form.showLabel !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                  onClick={() => setF({ showLabel: form.showLabel === false })}
+                >
+                  {form.showLabel !== false ? 'Activés' : 'Désactivés'}
+                </button>
+              </div>
             </div>
 
             <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>

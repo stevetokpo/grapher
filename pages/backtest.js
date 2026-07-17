@@ -4,6 +4,7 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import AppHeader       from '../components/layout/AppHeader';
 import BacktestConfig  from '../components/backtest/BacktestConfig';
 import BacktestResults from '../components/backtest/BacktestResults';
+import TradesChartModal from '../components/backtest/TradesChartModal';
 import appStyles from '../styles/app.module.css';
 import styles    from '../styles/backtest.module.css';
 
@@ -40,6 +41,12 @@ export default function BacktestPage() {
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState(null);
   const [error,   setError]   = useState(null);
+
+  // Trade sur lequel ouvrir la fenêtre graphe (null = fenêtre fermée).
+  // On mémorise le symbole et le TF du RUN, pas ceux de la config : celle-ci
+  // peut être modifiée après coup sans avoir relancé le backtest.
+  const [chartTrade, setChartTrade] = useState(null);
+  const [runCtx,     setRunCtx]     = useState(null);
 
   // ── Chargement symboles + stratégies disponibles ─────────────────────────
   useEffect(() => {
@@ -84,6 +91,7 @@ export default function BacktestPage() {
   const run = async () => {
     setRunning(true);
     setError(null);
+    setChartTrade(null);
     try {
       const res = await fetch('/api/backtest', {
         method:  'POST',
@@ -101,8 +109,13 @@ export default function BacktestPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       setResults(data);
+      setRunCtx({
+        symbol: symbols.find(s => s.id === config.symbolId) ?? null,
+        tf:     config.tf,
+      });
     } catch (err) {
       setResults(null);
+      setRunCtx(null);
       setError(err.message);
     } finally {
       setRunning(false);
@@ -155,11 +168,23 @@ export default function BacktestPage() {
                 </div>
               )}
               {running && <p className={styles.state}>Backtest en cours…</p>}
-              {results && !running && <BacktestResults results={results} />}
+              {results && !running && (
+                <BacktestResults results={results} onOpenChart={setChartTrade} />
+              )}
             </main>
           </>
         )}
       </div>
+
+      {chartTrade && runCtx?.symbol && (
+        <TradesChartModal
+          symbol={runCtx.symbol}
+          tf={runCtx.tf}
+          trades={results.trades}
+          initialTradeId={chartTrade.id}
+          onClose={() => setChartTrade(null)}
+        />
+      )}
     </div>
   );
 }

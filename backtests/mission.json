@@ -1,0 +1,12 @@
+{
+  "symbol": "Volatility 75 Index",
+  "tf": "1m",
+  "strategy": "trender-harmony",
+  "spread": 2,
+  "warmupDays": 35,
+  "minTrades": 30,
+  "params": {},
+  "is":   { "from": "2026-05-01", "to": "2026-06-20" },
+  "oos":  { "from": "2026-06-20", "to": "2026-07-12" },
+  "full": { "from": "2026-05-01", "to": "2026-07-12" }
+}

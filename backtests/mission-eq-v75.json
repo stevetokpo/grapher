@@ -1,0 +1,5 @@
+{ "symbol": "Volatility 75 Index", "tf": "5m", "strategy": "eq-balance",
+  "spread": 0, "warmupDays": 3, "minTrades": 30, "params": {},
+  "is":   { "from": "2026-01-04", "to": "2026-05-15" },
+  "oos":  { "from": "2026-05-15", "to": "2026-07-12" },
+  "full": { "from": "2026-01-04", "to": "2026-07-12" } }

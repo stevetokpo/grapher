@@ -31,6 +31,14 @@ const INDICATOR_TYPES = [
   { type: 'BB',    label: 'BB',    desc: 'Bollinger',        color: '#F59E0B', pane: 'overlay'     },
   { type: 'SWING', label: 'SWING', desc: 'Swing H/L',       color: '#34D399', pane: 'overlay'     },
   { type: 'RSI',   label: 'RSI',   desc: 'Force relative',  color: '#F472B6', pane: 'sous-graphe' },
+  { type: 'EQ',    label: 'EQ',    desc: 'Point d\'équilibre', color: '#A78BFA', pane: 'overlay'  },
+  { type: 'TRENDER', label: 'TRENDER', desc: 'Harmonie multi-HTF', color: '#34D399', pane: 'overlay' },
+];
+
+// Unités de temps supérieures (notation MT5), pour les 3 HTF de biais.
+const HTF_KEYS = [
+  'M1','M2','M3','M4','M5','M6','M10','M12','M15','M20','M30',
+  'H1','H2','H3','H4','H6','H8','H12','H16','D1','W1',
 ];
 
 const DEFAULT_FORM = {
@@ -42,6 +50,18 @@ const DEFAULT_FORM = {
   shapeHigh: 'arrowDown', shapeLow: 'arrowUp',
   showLabel: true, markerSize: 1,
   overbought: 70, oversold: 30,
+  // EQ
+  lookback: 60, threshold: 70, valueArea: 70, confirmBars: 2,
+  showScore: true, showProfile: true, showNaked: true, showBreak: true,
+  // TRENDER — défauts identiques à pines/trender.pine
+  useHtf1: true, htf1: 'H1',
+  useHtf2: true, htf2: 'H4',
+  useHtf3: true, htf3: 'H16',
+  bbLen: 50, bbMult: 0.369,
+  confFlt: 'toutes',
+  bgTransp: 80, showBg: true, showMark: true, showConf: true, showSlLn: true,
+  bullColor: '#26A69A', bearColor: '#EF5350', slColor: '#EF5350',
+  showBbCur: true, bbCurLen: 50, bbCurMult: 0.369, bbCurColor: '#60A5FA',
 };
 
 function NumInput({ value, min, max, step = 1, onChange }) {
@@ -88,11 +108,22 @@ function indParams(ind) {
   if (ind.type === 'BB')    return `±${ind.stdDev ?? 2}σ · off ${ind.offset ?? 0}`;
   if (ind.type === 'SWING') return ind.showLabel !== false ? 'labels on' : 'labels off';
   if (ind.type === 'RSI')   return `${ind.overbought ?? 70} / ${ind.oversold ?? 30}`;
+  if (ind.type === 'EQ')    return `seuil ${ind.threshold ?? 70} · VA ${ind.valueArea ?? 70}%`;
+  if (ind.type === 'TRENDER') {
+    const htf = [
+      ind.useHtf1 !== false && (ind.htf1 ?? 'H1'),
+      ind.useHtf2 !== false && (ind.htf2 ?? 'H4'),
+      ind.useHtf3 !== false && (ind.htf3 ?? 'H16'),
+    ].filter(Boolean).join(' · ');
+    return htf || 'aucun HTF';
+  }
   return SOURCES.find(s => s.value === ind.source)?.label ?? ind.source;
 }
 
 function indPeriodLabel(ind) {
-  if (ind.type === 'SWING') return `${ind.leftBars ?? 5}/${ind.rightBars ?? 5}`;
+  if (ind.type === 'SWING')   return `${ind.leftBars ?? 5}/${ind.rightBars ?? 5}`;
+  if (ind.type === 'EQ')      return String(ind.lookback ?? 60);
+  if (ind.type === 'TRENDER') return `BB ${ind.bbLen ?? 50}`;
   return String(ind.period ?? '—');
 }
 
@@ -131,6 +162,12 @@ export default function IndicatorPanel({ indicators, onChange, onClose }) {
     if (!selected) return;
     if (selected === 'SWING') {
       if ((form.leftBars ?? 5) < 1 || (form.rightBars ?? 5) < 1) return;
+    } else if (selected === 'EQ') {
+      if ((form.lookback ?? 60) < 20 || (form.lookback ?? 60) > 500) return;
+    } else if (selected === 'TRENDER') {
+      // Sans aucun HTF actif il n'y a pas d'harmonie à mesurer.
+      if (!form.useHtf1 && !form.useHtf2 && !form.useHtf3) return;
+      if ((form.bbLen ?? 50) < 1) return;
     } else if (form.period < 2 || form.period > 500) return;
 
     if (editingId) {
@@ -396,6 +433,225 @@ export default function IndicatorPanel({ indicators, onChange, onClose }) {
               </>
             )}
 
+            {/* EQ fields */}
+            {selected === 'EQ' && (
+              <>
+                <p className={styles.hint}>
+                  Reconstruit l’enchère des N dernières bougies, en extrait le prix sur lequel
+                  acheteurs et vendeurs s’accordent, et note 0-100 si le marché y est réellement
+                  en équilibre. Au-delà du seuil, la zone de balance est figée ; elle ne meurt
+                  que lorsque le prix est accepté hors de la valeur.
+                </p>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Fenêtre (bougies)</span>
+                    <NumInput value={form.lookback ?? 60} min={20} max={500} onChange={v => setF({ lookback: v })} />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Seuil d’équilibre</span>
+                    <NumInput value={form.threshold ?? 70} min={40} max={95} onChange={v => setF({ threshold: v })} />
+                  </div>
+                </div>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Value area (%)</span>
+                    <NumInput value={form.valueArea ?? 70} min={50} max={95} onChange={v => setF({ valueArea: v })} />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Confirmation cassure</span>
+                    <NumInput value={form.confirmBars ?? 2} min={1} max={10} onChange={v => setF({ confirmBars: v })} />
+                  </div>
+                </div>
+
+                <div className={styles.field}>
+                  <span className={styles.label}>Couleur</span>
+                  <Swatches value={form.color} onChange={c => setF({ color: c })} />
+                </div>
+
+                <div className={styles.markerGroup}>
+                  <span className={styles.markerGroupLabel} style={{ color: form.color }}>Affichage</span>
+                  <div className={styles.fieldRow}>
+                    {[
+                      ['showScore',   'Score (sous-graphe)'],
+                      ['showProfile', 'Profil d’enchère'],
+                    ].map(([key, label]) => (
+                      <div className={styles.field} key={key}>
+                        <span className={styles.label}>{label}</span>
+                        <button
+                          className={`${styles.toggleBtn}${form[key] !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                          onClick={() => setF({ [key]: form[key] === false })}
+                        >
+                          {form[key] !== false ? 'Activé' : 'Désactivé'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className={styles.fieldRow}>
+                    {[
+                      ['showBreak', 'Cassures'],
+                      ['showNaked', 'Naked POC'],
+                    ].map(([key, label]) => (
+                      <div className={styles.field} key={key}>
+                        <span className={styles.label}>{label}</span>
+                        <button
+                          className={`${styles.toggleBtn}${form[key] !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                          onClick={() => setF({ [key]: form[key] === false })}
+                        >
+                          {form[key] !== false ? 'Activé' : 'Désactivé'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* TRENDER fields */}
+            {selected === 'TRENDER' && (
+              <>
+                <p className={styles.hint}>
+                  Une Bollinger sur chacune des 3 unités de temps supérieures donne un biais.
+                  Quand <strong>tous les HTF actifs sont alignés</strong>, la zone d’harmonie
+                  s’ouvre. L’étiquette au début de zone nomme le HTF qui a basculé sur cette
+                  bougie — c’est lui qui complète l’harmonie. Non-repaint : chaque bougie lit
+                  la dernière bougie HTF <em>clôturée</em>.
+                </p>
+
+                {/* 3 HTF de biais */}
+                <div className={styles.markerGroup}>
+                  <span className={styles.markerGroupLabel} style={{ color: form.color }}>
+                    Biais — unités de temps supérieures
+                  </span>
+                  {[1, 2, 3].map(k => (
+                    <div className={styles.fieldRow} key={k}>
+                      <div className={styles.field}>
+                        <span className={styles.label}>HTF {k}</span>
+                        <button
+                          className={`${styles.toggleBtn}${form[`useHtf${k}`] !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                          onClick={() => setF({ [`useHtf${k}`]: form[`useHtf${k}`] === false })}
+                        >
+                          {form[`useHtf${k}`] !== false ? 'Actif' : 'Inactif'}
+                        </button>
+                      </div>
+                      <div className={styles.field}>
+                        <span className={styles.label}>Unité</span>
+                        <select
+                          className={styles.sourceSelect}
+                          value={form[`htf${k}`] ?? ['H1', 'H4', 'H16'][k - 1]}
+                          onChange={e => setF({ [`htf${k}`]: e.target.value })}
+                          disabled={form[`useHtf${k}`] === false}
+                        >
+                          {HTF_KEYS.map(h => <option key={h} value={h}>{h}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Bollinger — période</span>
+                    <NumInput value={form.bbLen ?? 50} min={1} max={500} onChange={v => setF({ bbLen: v })} />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Bollinger — écart-type</span>
+                    <NumInput value={form.bbMult ?? 0.369} min={0.01} max={5} step={0.001} onChange={v => setF({ bbMult: v })} />
+                  </div>
+                </div>
+
+                <div className={styles.field}>
+                  <span className={styles.label}>Filtre — zones confirmées par</span>
+                  <select className={styles.sourceSelect} value={form.confFlt ?? 'toutes'}
+                    onChange={e => setF({ confFlt: e.target.value })}>
+                    {['toutes', 'HTF 1', 'HTF 2', 'HTF 3'].map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+
+                {/* Affichage des zones */}
+                <div className={styles.markerGroup}>
+                  <span className={styles.markerGroupLabel} style={{ color: form.bullColor ?? '#26A69A' }}>
+                    Zones d’harmonie
+                  </span>
+                  <div className={styles.fieldRow}>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Couleur haussière</span>
+                      <Swatches value={form.bullColor ?? '#26A69A'} onChange={c => setF({ bullColor: c })} />
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Couleur baissière</span>
+                      <Swatches value={form.bearColor ?? '#EF5350'} onChange={c => setF({ bearColor: c })} />
+                    </div>
+                  </div>
+                  <div className={styles.fieldRow}>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Transparence du fond</span>
+                      <NumInput value={form.bgTransp ?? 80} min={0} max={100} onChange={v => setF({ bgTransp: v })} />
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Fond coloré</span>
+                      <button
+                        className={`${styles.toggleBtn}${form.showBg !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                        onClick={() => setF({ showBg: form.showBg === false })}
+                      >{form.showBg !== false ? 'Activé' : 'Désactivé'}</button>
+                    </div>
+                  </div>
+                  <div className={styles.fieldRow}>
+                    {[
+                      ['showMark', 'Marqueur de début'],
+                      ['showConf', 'Étiquette du confirmateur'],
+                    ].map(([key, label]) => (
+                      <div className={styles.field} key={key}>
+                        <span className={styles.label}>{label}</span>
+                        <button
+                          className={`${styles.toggleBtn}${form[key] !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                          onClick={() => setF({ [key]: form[key] === false })}
+                        >{form[key] !== false ? 'Activé' : 'Désactivé'}</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Bollinger du timeframe courant + trait ≈ SL */}
+                <div className={styles.markerGroup}>
+                  <span className={styles.markerGroupLabel} style={{ color: form.bbCurColor ?? '#60A5FA' }}>
+                    Bollinger du timeframe courant
+                  </span>
+                  <div className={styles.fieldRow}>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Afficher les bandes</span>
+                      <button
+                        className={`${styles.toggleBtn}${form.showBbCur !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                        onClick={() => setF({ showBbCur: form.showBbCur === false })}
+                      >{form.showBbCur !== false ? 'Activé' : 'Désactivé'}</button>
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Trait base BB (≈ SL)</span>
+                      <button
+                        className={`${styles.toggleBtn}${form.showSlLn !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                        onClick={() => setF({ showSlLn: form.showSlLn === false })}
+                      >{form.showSlLn !== false ? 'Activé' : 'Désactivé'}</button>
+                    </div>
+                  </div>
+                  <div className={styles.fieldRow}>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Période</span>
+                      <NumInput value={form.bbCurLen ?? 50} min={1} max={500} onChange={v => setF({ bbCurLen: v })} />
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Écart-type</span>
+                      <NumInput value={form.bbCurMult ?? 0.369} min={0.01} max={5} step={0.001} onChange={v => setF({ bbCurMult: v })} />
+                    </div>
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Couleur des bandes</span>
+                    <Swatches value={form.bbCurColor ?? '#60A5FA'} onChange={c => setF({ bbCurColor: c })} />
+                  </div>
+                </div>
+              </>
+            )}
+
             <button
               className={`${styles.addBtn}${editingId ? ` ${styles.saveBtn}` : ''}`}
               onClick={save}
@@ -445,7 +701,9 @@ export default function IndicatorPanel({ indicators, onChange, onClose }) {
                     <span className={styles.indPeriod}>{indPeriodLabel(ind)}</span>
                     <span className={styles.indSource}>{indParams(ind)}</span>
 
-                    {ind.type === 'RSI' && <span className={styles.paneBadge}>↓</span>}
+                    {(ind.type === 'RSI' || (ind.type === 'EQ' && ind.showScore !== false)) && (
+                      <span className={styles.paneBadge}>↓</span>
+                    )}
 
                     <button
                       className={`${styles.editBtn}${isEditing ? ` ${styles.editBtnActive}` : ''}`}

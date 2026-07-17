@@ -7,6 +7,7 @@ import { useBars }        from '../hooks/useBars';
 import { useFootprint }   from '../hooks/useFootprint';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useCVD }         from '../hooks/useCVD';
+import { useHtfBars }     from '../hooks/useHtfBars';
 import { useDrawings }    from '../hooks/useDrawings';
 import AppHeader        from '../components/layout/AppHeader';
 import StatsBar         from '../components/layout/StatsBar';
@@ -27,6 +28,7 @@ const SettingsPanel  = dynamic(() => import('../components/SettingsPanel'),     
 const ReplayModal    = dynamic(() => import('../components/replay/ReplayModal'),      { ssr: false });
 const PatternPanel   = dynamic(() => import('../components/PatternPanel'),             { ssr: false });
 const ChatPanel      = dynamic(() => import('../components/chat/ChatPanel'),           { ssr: false });
+const AlertsPanel    = dynamic(() => import('../components/AlertsPanel'),              { ssr: false });
 
 export default function Home() {
   const router = useRouter();
@@ -44,6 +46,7 @@ export default function Home() {
   const [showSettings,    setShowSettings]    = useState(false);
   const [showReplay,      setShowReplay]      = useState(false);
   const [showChat,        setShowChat]        = useState(false);
+  const [showAlerts,      setShowAlerts]      = useState(false);
 
   const {
     drawings, activeTool, setActiveTool,
@@ -73,6 +76,10 @@ export default function Home() {
   );
 
   const cvdData = useCVD(inFootprint ? null : symbolId, tfId);
+
+  // Séries HTF pour l'indicateur TRENDER — chargées indépendamment des bougies
+  // du graphe, qui n'en contiennent jamais assez (cf. hooks/useHtfBars).
+  const htfBars = useHtfBars(symbolId, indicators, displayBars);
 
   // Footprint data — only fetched when footprint mode is active for a symbol with ticks
   const {
@@ -131,6 +138,7 @@ export default function Home() {
         onRsi={() => router.push('/rsi')}
         onBacktest={() => router.push('/backtest')}
         onChat={() => setShowChat(true)}
+        onAlerts={() => setShowAlerts(true)}
       />
       <StatsBar allBars={allBars} currentSym={currentSym} loading={loading} />
       <TimeframeBar
@@ -179,6 +187,7 @@ export default function Home() {
                 candles={displayBars}
                 onLoadMore={onLoadMore}
                 indicators={indicators}
+                htfBars={htfBars}
                 patterns={effectivePatterns}
                 chartMode={chartMode}
                 bullColor={settings?.bullColor ?? '#26A69A'}
@@ -209,6 +218,7 @@ export default function Home() {
       {showSettings    && <SettingsPanel  onClose={() => setShowSettings(false)}   settings={settings}     onChange={setSettings} />}
       {showReplay      && <ReplayModal    onClose={() => setShowReplay(false)} />}
       {showChat        && <ChatPanel      onClose={() => setShowChat(false)} />}
+      {showAlerts      && <AlertsPanel    onClose={() => setShowAlerts(false)}     symbols={symbols} symbolId={symbolId} />}
     </div>
   );
 }

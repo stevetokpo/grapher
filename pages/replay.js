@@ -1,15 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useDrawings }     from '../hooks/useDrawings';
 import { useReplay }       from '../hooks/useReplay';
 import { useTrades }       from '../hooks/useTrades';
+import { useHtfBars }     from '../hooks/useHtfBars';
 import AppHeader    from '../components/layout/AppHeader';
 import TimeframeBar from '../components/layout/TimeframeBar';
 import styles       from '../styles/app.module.css';
 import { DEFAULT_SETTINGS } from '../components/SettingsPanel';
-import { DEFAULT_PATTERNS } from '../components/PatternPanel';
+import { DEFAULT_PATTERNS, PATTERN_TYPES } from '../components/PatternPanel';
 
 const TradingChart   = dynamic(() => import('../components/charts/TradingChart'),   { ssr: false });
 const DrawingToolbar = dynamic(() => import('../components/charts/DrawingToolbar'),  { ssr: false });
@@ -38,6 +39,16 @@ export default function ReplayPage() {
   const [showSettings,     setShowSettings]     = useState(false);
   const [tradeSetupActive, setTradeSetupActive] = useState(false);
 
+  // Merge stored patterns with PATTERN_TYPES so newly-added patterns render even
+  // when the user's localStorage predates them. Stored values win over defaults.
+  const effectivePatterns = useMemo(
+    () => PATTERN_TYPES.map(pt => {
+      const stored = patterns.find(p => p.type === pt.type);
+      return stored ? { ...pt, ...stored } : { ...pt, enabled: true };
+    }),
+    [patterns],
+  );
+
   const {
     drawings, activeTool, setActiveTool,
     selectedId, setSelectedId,
@@ -50,6 +61,10 @@ export default function ReplayPage() {
     stepSize, setStepSize,
     play, pause, stepForward, stepBack, seekToPercent,
   } = useReplay(allM1Bars, tfId);
+
+  // Séries HTF pour TRENDER. Bornées à la dernière bougie VISIBLE : en replay le
+  // curseur est la seule vérité, aucune bougie future ne doit entrer dans le calcul.
+  const htfBars = useHtfBars(symIdStr ? parseInt(symIdStr, 10) : null, indicators, visibleBars);
 
   const {
     openTrades, closedTrades, stats,
@@ -142,7 +157,7 @@ export default function ReplayPage() {
         onTickSizeChange={() => {}}
         indicatorCount={indicators.length}
         onIndicators={() => setShowIndicators(true)}
-        patternCount={patterns.filter(p => p.enabled).length}
+        patternCount={effectivePatterns.filter(p => p.enabled).length}
         onPatterns={() => setShowPatterns(true)}
       />
 
@@ -209,7 +224,8 @@ export default function ReplayPage() {
             candles={visibleBars}
             onLoadMore={null}
             indicators={indicators}
-            patterns={patterns}
+            htfBars={htfBars}
+            patterns={effectivePatterns}
             bullColor={settings?.bullColor ?? '#26A69A'}
             bearColor={settings?.bearColor ?? '#EF5350'}
             showVolume={settings?.showVolume ?? true}

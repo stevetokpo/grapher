@@ -1,0 +1,190 @@
+//@version=6
+// =========================================================================
+//  INDICATEUR : Harmonie Multi-HTF — version MIN
+//
+//  Version épurée de indicator.max.pine :
+//    - 3 HTF de biais (Bollinger) -> zones d'harmonie STRICTE
+//      toutes haussières -> fond vert ; toutes baissières -> fond rouge
+//    - Bandes de Bollinger du timeframe actuel (affichage)
+//  Rien d'autre : pas de confirmation HTF, pas de filtre bougie majeure,
+//  pas de niveaux SL/TP, pas d'étiquette de distance, pas de filtre résultat.
+//
+//  Option FVG : détection des Fair Value Gaps haussières et baissières
+//  (pattern 3 bougies). Toutes les FVG formées sont tracées, sans suivi
+//  de mitigation ni d'inversion (iFVG).
+//
+//  Calcul NON-REPAINT (lookahead_on + [1] = dernière bougie HTF clôturée).
+// =========================================================================
+indicator("Harmonie Multi-HTF — MIN", overlay = true, max_labels_count = 500, max_boxes_count = 500)
+
+// ============================ INPUTS =====================================
+grpHtf  = "Biais — 3 unités de temps supérieures"
+useHtf1 = input.bool(true,  "HTF 1", inline = "h1", group = grpHtf)
+htf1    = input.timeframe("60",  "", inline = "h1", group = grpHtf)
+useHtf2 = input.bool(true,  "HTF 2", inline = "h2", group = grpHtf)
+htf2    = input.timeframe("240", "", inline = "h2", group = grpHtf)
+useHtf3 = input.bool(true,  "HTF 3", inline = "h3", group = grpHtf)
+htf3    = input.timeframe("960", "", inline = "h3", group = grpHtf)
+
+bbLen   = input.int(50,     "Bollinger — période",    minval = 1,    group = grpHtf)
+bbMult  = input.float(0.369,"Bollinger — écart-type", minval = 0.01, step = 0.001, group = grpHtf)
+
+grpView   = "Affichage"
+showBg    = input.bool(true, "Colorer le fond des zones", group = grpView)
+showMark  = input.bool(true, "Marquer le début des zones", group = grpView)
+bgTransp  = input.int(80, "Transparence du fond", minval = 0, maxval = 100, group = grpView)
+colBull   = input.color(color.green, "Couleur haussière", group = grpView)
+colBear   = input.color(color.red,   "Couleur baissière", group = grpView)
+showConf  = input.bool(true, "Étiqueter le HTF qui confirme l'harmonie", group = grpView,
+     tooltip = "Au début de chaque zone, affiche en étiquette le ou les HTF dont la tendance a basculé sur la bougie de détection — c'est celui qui complète l'harmonie, les autres étant déjà alignés.")
+showSlLn  = input.bool(true, "Tracer la base BB à la détection (≈ SL)", group = grpView,
+     tooltip = "Au début de chaque zone, fige la valeur de la ligne moyenne des BB du timeframe actuel et la trace en trait horizontal sur toute la durée de la zone. Représente grosso modo le SL.")
+
+// Bollinger du timeframe ACTUEL (affichage) — indépendante de la BB
+// utilisée pour le biais HTF (réglages séparés).
+grpBbCur   = "Bollinger — timeframe actuel (affichage)"
+showBbCur  = input.bool(true,  "Afficher les BB du timeframe actuel", group = grpBbCur)
+bbCurLen   = input.int(50,     "Période",    minval = 1,    group = grpBbCur)
+bbCurMult  = input.float(0.369, "Écart-type", minval = 0.01, step = 0.001, group = grpBbCur)
+colBbCur   = input.color(color.blue, "Couleur des bandes", group = grpBbCur)
+
+// Filtre : ne montrer que les zones confirmées par un HTF donné.
+grpFlt  = "Filtre — HTF confirmateur"
+confFlt = input.string("Off (toutes)", "Montrer les zones confirmées par", group = grpFlt,
+     options = ["Off (toutes)", "HTF 1", "HTF 2", "HTF 3"],
+     tooltip = "Le HTF confirmateur est celui dont la tendance a basculé sur la bougie de détection (celui de l'étiquette). Quand un HTF est choisi, seules les zones qu'il a confirmées restent visibles (fond, marqueur, étiquette, trait SL) ; les autres sont cachées. Les alertes continuent de partir pour toutes les zones.")
+
+// FVG : Fair Value Gaps du timeframe actuel (pattern 3 bougies).
+grpFvg      = "FVG — Fair Value Gaps"
+showFvgBull = input.bool(true, "FVG haussières", group = grpFvg,
+     tooltip = "FVG haussière : le bas de la bougie actuelle reste au-dessus du haut de la bougie n-2. Toutes les FVG formées sont tracées, sans suivi de mitigation ni d'inversion (iFVG).")
+showFvgBear = input.bool(true, "FVG baissières", group = grpFvg,
+     tooltip = "FVG baissière : le haut de la bougie actuelle reste sous le bas de la bougie n-2. Toutes les FVG formées sont tracées, sans suivi de mitigation ni d'inversion (iFVG).")
+fvgMinPts  = input.float(0.0, "Taille minimale du gap (points, 0 = toutes)", minval = 0.0, step = 1.0, group = grpFvg,
+     tooltip = "Ignore les FVG dont la hauteur est inférieure à ce nombre de points (unités de prix).")
+fvgAtrLen  = input.int(14, "ATR — période", minval = 1, group = grpFvg,
+     tooltip = "ATR utilisé pour filtrer la bougie centrale (celle qui crée le gap). L'ATR est mesuré avant cette bougie.")
+fvgAtrMin  = input.float(1.0, "Bougie centrale >= ATR x", minval = 0.0, step = 0.1, group = grpFvg,
+     tooltip = "L'amplitude (haut-bas) de la bougie centrale doit être au moins ce multiple de l'ATR. 0 = désactivé.")
+fvgAtrMax  = input.float(3.0, "Bougie centrale <= ATR x", minval = 0.0, step = 0.1, group = grpFvg,
+     tooltip = "L'amplitude (haut-bas) de la bougie centrale doit être au plus ce multiple de l'ATR. 0 = désactivé.")
+fvgExtend  = input.int(20, "Extension des boxes (bougies)", minval = 1, group = grpFvg,
+     tooltip = "Longueur du tracé de chaque FVG vers la droite, à partir de sa bougie de formation.")
+colFvgBull = input.color(color.new(color.teal,   75), "Couleur FVG haussière", group = grpFvg)
+colFvgBear = input.color(color.new(color.orange, 75), "Couleur FVG baissière", group = grpFvg)
+
+// ============================ BIAIS HTF ==================================
+// Renvoie 1 (haussier), -1 (baissier), 0 (neutre) pour une TF donnée.
+// NON-REPAINT : lookahead_on + [1] => valeur de la dernière bougie HTF close.
+f_trend(simple string tf) =>
+    [basis, dev, cl] = request.security(syminfo.tickerid, tf,
+         [ta.sma(close, bbLen)[1],
+          (bbMult * ta.stdev(close, bbLen))[1],
+          close[1]],
+         lookahead = barmerge.lookahead_on)
+    cl > basis + dev ? 1 : cl < basis - dev ? -1 : 0
+
+t1 = f_trend(htf1)
+t2 = f_trend(htf2)
+t3 = f_trend(htf3)
+
+score  = (useHtf1 ? t1 : 0) + (useHtf2 ? t2 : 0) + (useHtf3 ? t3 : 0)
+active = (useHtf1 ? 1 : 0)  + (useHtf2 ? 1 : 0)  + (useHtf3 ? 1 : 0)
+
+// Harmonie STRICTE : tous les HTF actifs alignés dans le même sens
+harmonyBull = active > 0 and score ==  active
+harmonyBear = active > 0 and score == -active
+
+// ==================== BB DU TIMEFRAME ACTUEL (calcul) ====================
+bbCurBasis = ta.sma(close, bbCurLen)
+bbCurDev   = bbCurMult * ta.stdev(close, bbCurLen)
+
+// ==================== DÉTECTION & CONFIRMATEURS ==========================
+startBull = harmonyBull and not harmonyBull[1]
+startBear = harmonyBear and not harmonyBear[1]
+
+// HTF confirmateurs : ceux dont la tendance a basculé sur la bougie de
+// détection (les autres étaient déjà alignés).
+c1 = (startBull or startBear) and useHtf1 and t1 != t1[1]
+c2 = (startBull or startBear) and useHtf2 and t2 != t2[1]
+c3 = (startBull or startBear) and useHtf3 and t3 != t3[1]
+
+// Filtre par HTF confirmateur : évalué à la détection puis figé pour toute
+// la durée de la zone.
+var bool zoneVis = true
+if startBull or startBear
+    zoneVis := confFlt == "Off (toutes)" or
+         (confFlt == "HTF 1" ? c1 : confFlt == "HTF 2" ? c2 : c3)
+
+// ============================ VISUEL =====================================
+// Fond coloré sur toute la durée de la zone favorable (selon filtre)
+bg = harmonyBull ? color.new(colBull, bgTransp) : harmonyBear ? color.new(colBear, bgTransp) : na
+bgcolor(showBg and zoneVis ? bg : na, title = "Zone favorable")
+
+plotshape(showMark and startBull and zoneVis, title = "Début zone haussière", style = shape.triangleup,
+     location = location.belowbar, color = colBull, size = size.tiny)
+plotshape(showMark and startBear and zoneVis, title = "Début zone baissière", style = shape.triangledown,
+     location = location.abovebar, color = colBear, size = size.tiny)
+
+// Étiquette du HTF confirmateur : celui dont la tendance a changé sur la
+// bougie de détection (les autres étaient déjà alignés). S'il y en a
+// plusieurs (bascules simultanées), tous sont listés.
+f_tfTxt(simple string tf) =>
+    sec = timeframe.in_seconds(tf)
+    sec >= 604800 ? str.tostring(sec / 604800) + "sem" :
+         sec >= 86400 ? str.tostring(sec / 86400) + "j" :
+         sec >= 3600 ? str.tostring(sec / 3600) + "h" :
+         str.tostring(sec / 60) + "min"
+
+if showConf and zoneVis and (startBull or startBear)
+    confTxt = (c1 ? f_tfTxt(htf1) : "")
+         + (c2 ? (c1 ? " + " : "") + f_tfTxt(htf2) : "")
+         + (c3 ? (c1 or c2 ? " + " : "") + f_tfTxt(htf3) : "")
+    label.new(bar_index, startBull ? low : high, confTxt == "" ? "—" : confTxt,
+         style = startBull ? label.style_label_up : label.style_label_down,
+         color = color.new(startBull ? colBull : colBear, 20),
+         textcolor = color.white, size = size.small)
+
+// Trait horizontal « ≈ SL » : base des BB du TF actuel figée à la détection,
+// tracé sur toute la durée de la zone.
+var float slLvl = na
+if startBull or startBear
+    slLvl := bbCurBasis
+zoneOn = harmonyBull or harmonyBear
+plot(showSlLn and zoneOn and zoneVis ? slLvl : na, "Base BB à la détection (≈ SL)",
+     style = plot.style_linebr, color = color.new(color.red, 0), linewidth = 2)
+
+// Bollinger du timeframe actuel (affichage)
+pBbBasis = plot(showBbCur ? bbCurBasis : na,            "BB actuel — base",  color = color.new(colBbCur, 30))
+pBbUpper = plot(showBbCur ? bbCurBasis + bbCurDev : na, "BB actuel — haute", color = color.new(colBbCur, 0))
+pBbLower = plot(showBbCur ? bbCurBasis - bbCurDev : na, "BB actuel — basse", color = color.new(colBbCur, 0))
+fill(pBbUpper, pBbLower, color = showBbCur ? color.new(colBbCur, 92) : na, title = "BB actuel — remplissage")
+
+// ============================ FVG =========================================
+// FVG haussière : gap entre le haut de la bougie n-2 et le bas de la bougie
+// actuelle (la bougie centrale a laissé un vide). FVG baissière : gap entre
+// le bas de la bougie n-2 et le haut de la bougie actuelle. La box couvre
+// exactement le gap et démarre à la bougie de formation (n-2).
+fvgBull = low > high[2]
+fvgBear = high < low[2]
+
+// Filtre ATR sur la bougie centrale (n-1, celle qui crée le gap) :
+// son amplitude doit tenir entre min x ATR et max x ATR (bornes
+// désactivables avec 0). ATR mesuré AVANT la bougie centrale ([2]).
+fvgAtr   = ta.atr(fvgAtrLen)
+midRange = high[1] - low[1]
+fvgAtrOk = (fvgAtrMin <= 0 or midRange >= fvgAtrMin * fvgAtr[2]) and
+     (fvgAtrMax <= 0 or midRange <= fvgAtrMax * fvgAtr[2])
+
+if showFvgBull and fvgBull and fvgAtrOk and (fvgMinPts <= 0 or low - high[2] >= fvgMinPts)
+    box.new(bar_index - 2, low, bar_index + fvgExtend, high[2],
+         border_color = na, bgcolor = colFvgBull)
+if showFvgBear and fvgBear and fvgAtrOk and (fvgMinPts <= 0 or low[2] - high >= fvgMinPts)
+    box.new(bar_index - 2, low[2], bar_index + fvgExtend, high,
+         border_color = na, bgcolor = colFvgBear)
+
+// ============================ ALERTE =====================================
+// Dans TradingView : créer l'alerte avec « Any alert() function call ».
+if startBull or startBear
+    alert("Harmonie HTF " + (startBull ? "HAUSSIÈRE" : "BAISSIÈRE") + " sur "
+         + syminfo.ticker + " (" + timeframe.period + ")", alert.freq_once_per_bar)

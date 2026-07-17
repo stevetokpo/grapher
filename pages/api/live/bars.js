@@ -1,5 +1,6 @@
 import { query, exec } from '../../../lib/db';
 import { getOrCreateSymbol, ingestAuthorized, validSymbolName } from '../../../lib/ingest';
+import { evaluateAlerts } from '../../../lib/notify/evaluate';
 
 // Ingestion de bougies M1 depuis l'EA MT5 (mq5/GrapherFeeder.mq5).
 // POST { symbol, bars: [[t, open, high, low, close, tickVol, realVol, spread], …] }
@@ -62,8 +63,15 @@ export default async function handler(req, res) {
       'SELECT epoch(max(ts))::BIGINT AS last FROM bars_m1 WHERE symbol_id = ?',
       symbolId,
     );
+    const lastTs = Number(last);
 
-    res.json({ ok: true, symbolId, received: rows.length, lastTs: Number(last) });
+    // Évaluation des alertes : délibérément SANS await. L'EA poste toutes les
+    // 2 s et ne doit pas attendre un SMTP ou un appel Telegram. La promesse
+    // flottante va au bout parce que Next tourne ici en process long-vivant
+    // (et non en serverless, où il faudrait un waitUntil).
+    evaluateAlerts(symbolId, lastTs).catch(err => console.error('[notify]', err));
+
+    res.json({ ok: true, symbolId, received: rows.length, lastTs });
   } catch (err) {
     console.error('[live/bars]', err);
     res.status(500).json({ error: err.message });

@@ -18,12 +18,17 @@ lib/backtest/
     twinsBars.js       exemple : pattern Twins Bars (réutilise lib/patterns.js)
     trenderHarmony.js  portage de pines/trender-strategy.pine (harmonie multi-HTF,
                        break-even, Revenger — ordres stop + modify)
+    rfvgZone.js        zones rFVG/aFVG (lib/patterns.js) : retest ou détection,
+                       SL/TP fixes (points ou ATR), break-even en R
 
 pages/api/backtest.js  GET  → liste des stratégies + schémas de params
                        POST → exécute un backtest, renvoie métriques + trades
 pages/backtest.js      page UI (accessible via le bouton « Backtest » du header)
 components/backtest/   BacktestConfig (formulaire auto-généré), BacktestResults,
-                       EquityChart (SVG)
+                       EquityChart (SVG), TradesChartModal (fenêtre graphe)
+components/charts/TradesPrimitive.js
+                       positions peintes sur le graphe : bandes SL/TP, trajet
+                       entrée → sortie, SL initial si déplacé par un break-even
 ```
 
 ## Sémantique d'exécution (contrat du moteur)
@@ -39,7 +44,13 @@ Ces règles garantissent des résultats honnêtes — ne pas les affaiblir :
    chaque bougie agrégée). L'ordre chronologique intra-bougie est donc réel,
    pas deviné sur l'OHLC agrégé.
 3. **Règle conservatrice** — si SL et TP sont touchés dans la **même bougie
-   M1**, le SL gagne (identique à `useTrades` du replay).
+   M1**, le SL gagne (identique à `useTrades` du replay). Le SL est rempli au
+   **pire du niveau du stop et de l'open M1** : si le marché ouvre au-delà du
+   stop (gap), le fill est à l'open. Un stop ne rend donc jamais un prix
+   meilleur que le marché — y compris s'il a été déplacé du **mauvais côté** du
+   prix par un break-even mal réglé, cas qui fabriquait auparavant du profit pur
+   (stop rempli à un niveau où le marché n'a jamais traité). Le TP reste rempli
+   à son niveau exact, hypothèse conservatrice symétrique.
 4. **Une position à la fois** — un signal opposé ferme puis retourne la
    position (flip) au prochain open ; un signal dans le même sens est ignoré.
 5. **Spread** — coût fixe en points déduit une fois par trade
@@ -155,6 +166,51 @@ Réponse :
 
 `GET /api/backtest` → `[{ id, label, desc, params }]` (découverte des
 stratégies pour l'UI).
+
+## Fenêtre graphe (revoir les trades)
+
+Depuis les résultats, « Voir sur le graphe » (ou un clic sur n'importe quelle
+ligne de la liste des trades) ouvre le graphe du symbole testé avec les
+positions dessinées : zone de gain (entrée → TP), zone de risque (entrée → SL
+final), trajet entrée → sortie coloré par le résultat, marqueurs d'entrée et de
+sortie. Quand un break-even a déplacé le stop, le **SL initial** est rappelé en
+pointillé — sans lui, la zone de risque affichée serait celle d'après coup et le
+R du trade (mesuré sur le risque initial) deviendrait illisible.
+
+Deux détails qui piègent :
+
+- Les temps d'un trade ne tombent pas sur des temps de bougie : l'entrée est à
+  l'open d'une bougie TF, mais la sortie est datée à la **minute** (SL/TP
+  vérifiés M1 par M1). Le graphe ne sait placer que des temps présents dans ses
+  données — chaque temps est donc ramené à la bougie qui le contient, sinon
+  marqueurs et rectangles sont silencieusement ignorés.
+- Un backtest couvre bien plus de bougies que le graphe n'en charge d'un coup.
+  La fenêtre est **ancrée sur un trade** (le bloc de bougies qui l'entoure) et
+  remonte le temps à la demande ; naviguer d'un trade à l'autre ne recharge que
+  si le trade visé sort du bloc déjà chargé.
+
+## Note sur la stratégie rFVG (rfvgZone)
+
+Le motif (cf. `pines/rFVG.pine`) a besoin de la bougie **suivante** pour exister :
+il n'est connu qu'à la clôture de celle-ci. Une zone dont la bougie centrale est
+en `i` n'est donc armée qu'à partir de `i+1` — c'est la seule façon d'éviter le
+lookahead.
+
+Conséquence non évidente : le **bord proche** de la zone (celui que le prix
+rencontre en revenant) *est* l'extrême exact de cette bougie de confirmation
+(`bottom = high` de la suivante pour une zone baissière). Une règle de retest
+naïve serait donc déclenchée par la bougie de confirmation elle-même — touche
+triviale par égalité — et le mode « retest » se réduirait silencieusement au mode
+« entrée immédiate ». La zone n'est testée qu'à partir de la bougie d'après.
+
+La marge d'entrée (`entryAtr` × ATR) enfonce le niveau dans la zone ; elle est
+**bornée au bord opposé**, si bien qu'une marge plus large que la zone revient à
+en attendre la traversée complète, jamais à rendre le déclenchement inatteignable
+(sinon un réglage produirait zéro trade sans qu'on comprenne pourquoi).
+
+Le moteur n'a pas d'ordre limite d'entrée : le toucher est constaté à la clôture
+et l'entrée se fait au marché à l'open suivant. Le fill peut donc être moins bon
+que le niveau visé — jamais meilleur.
 
 ## Note sur le portage Pine (trenderHarmony)
 
