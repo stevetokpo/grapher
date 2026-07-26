@@ -1,0 +1,296 @@
+/* Page /rfvg — réglages rFVG par symbole (détection figée, sorties calibrées).
+   Reprend les tokens de globals.css. Page scrollable, contrairement au shell
+   de l'app qui est overflow hidden. */
+
+.page {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse 60% 40% at 15% 0%, rgba(251, 146, 60, 0.045) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 85% 100%, rgba(96, 165, 250, 0.04) 0%, transparent 70%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+/* ── En-tête ─────────────────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 26px;
+  border-bottom: 1px solid var(--border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.logoLink { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--text); }
+.logoText { font-size: 14px; font-weight: 800; letter-spacing: 0.14em; }
+
+.headerTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #FB923C;
+  letter-spacing: 0.05em;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-2);
+}
+
+.headerNote { margin-left: auto; font-size: 11.5px; color: var(--text-dim); }
+
+/* ── Grille principale ───────────────────────────────────────────────────── */
+
+.shell {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 18px;
+  padding: 20px 26px 60px;
+  max-width: 1560px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .shell { grid-template-columns: 1fr; }
+}
+
+/* ── Colonne des symboles ────────────────────────────────────────────────── */
+
+.side { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 74px; }
+
+.sideTitle {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 0 2px;
+}
+
+.symList { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; }
+
+.symRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font);
+  transition: border-color var(--ease), background var(--ease);
+}
+
+.symRow:hover { border-color: var(--border-2); }
+
+.symRowOn {
+  border-color: rgba(251, 146, 60, 0.5);
+  background: rgba(251, 146, 60, 0.06);
+}
+
+.symRowTop { display: flex; align-items: center; gap: 7px; }
+.symName { font-size: 12px; font-weight: 600; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.symTf { font-size: 10px; font-weight: 700; color: var(--text-dim); }
+.symMeta { font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); }
+
+.badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  text-transform: uppercase;
+}
+
+.empty { font-size: 11.5px; color: var(--text-dim); padding: 12px 2px; line-height: 1.6; }
+
+/* ── Cartes ──────────────────────────────────────────────────────────────── */
+
+.main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  padding: 16px 18px;
+}
+
+.cardTitle {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0 0 4px;
+}
+
+.cardSub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.65;
+  margin: 0 0 12px;
+}
+
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.grow { flex: 1; min-width: 0; }
+
+/* ── Formulaire ──────────────────────────────────────────────────────────── */
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px 14px;
+}
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+
+.label {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.labelKey { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); }
+
+.input, .select {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  padding: 6px 9px;
+  width: 100%;
+  outline: none;
+  transition: border-color var(--ease);
+}
+
+.input:focus, .select:focus { border-color: var(--border-2); }
+.input:disabled, .select:disabled { color: var(--text-dim); }
+
+.check { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-muted); padding-top: 16px; }
+
+.hint { font-size: 10px; color: var(--text-dim); line-height: 1.5; }
+
+.btn {
+  padding: 7px 16px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: var(--font);
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: color var(--ease), border-color var(--ease), background var(--ease);
+}
+
+.btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+
+.btnPrimary {
+  border-color: rgba(251, 146, 60, 0.4);
+  color: #FB923C;
+}
+.btnPrimary:hover:not(:disabled) { background: rgba(251, 146, 60, 0.1); color: #FB923C; box-shadow: var(--glow-amber); }
+
+.btnDanger { border-color: rgba(239, 83, 80, 0.35); color: var(--bear); }
+.btnDanger:hover:not(:disabled) { background: var(--bear-bg); color: var(--bear); }
+
+.error {
+  font-size: 11.5px;
+  color: var(--bear);
+  background: var(--bear-bg);
+  border: 1px solid var(--bear-ring);
+  border-radius: var(--r);
+  padding: 8px 11px;
+}
+
+.warn {
+  font-size: 11.5px;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-ring);
+  border-radius: var(--r);
+  padding: 8px 11px;
+  line-height: 1.6;
+}
+
+/* ── Tuiles de stats ─────────────────────────────────────────────────────── */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 9px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+}
+
+.tileKey { font-size: 9.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-dim); }
+.tileVal { font-size: 17px; font-weight: 700; font-family: var(--font-mono); }
+.tileSub { font-size: 10px; color: var(--text-muted); line-height: 1.45; }
+
+/* ── Tableaux ────────────────────────────────────────────────────────────── */
+
+.tableWrap { overflow-x: auto; }
+
+.table { width: 100%; border-collapse: collapse; font-size: 11.5px; font-family: var(--font-mono); }
+
+.table th {
+  text-align: right;
+  padding: 6px 10px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font);
+  white-space: nowrap;
+}
+
+.table th:first-child, .table td:first-child { text-align: left; }
+
+.table td {
+  text-align: right;
+  padding: 6px 10px;
+  color: var(--text-muted);
+  border-bottom: 1px solid rgba(26, 37, 64, 0.5);
+  white-space: nowrap;
+}
+
+.table td:first-child { color: var(--text); }
+.table tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
+
+.bestRow td { color: var(--text); background: rgba(38, 166, 154, 0.07); }
+.bestRow td:first-child { font-weight: 700; }
+.baseRow td { color: var(--text-dim); font-style: italic; }
+
+.twoCol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 980px) { .twoCol { grid-template-columns: 1fr; } }
+
+.caveat {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.7;
+  border-left: 2px solid var(--border-2);
+  padding-left: 12px;
+  margin: 0;
+}
+
+.mono { font-family: var(--font-mono); }

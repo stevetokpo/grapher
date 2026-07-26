@@ -1,0 +1,31 @@
+{
+  "_": "Mission de l'optimiseur rFVG. La DÉTECTION est figée par l'utilisateur (c'est son motif) ; seules les SORTIES sont balayées, symbole par symbole.",
+  "tf": "1m",
+  "split": 0.7,
+  "minTrades": 100,
+  "fills": "bar",
+  "detect": {
+    "mode": "rfvg",
+    "direction": "both",
+    "maPeriodFast": 49,
+    "maPeriodSlow": 51,
+    "sizeMode": "body",
+    "atrPeriod": 14,
+    "atrMult": 1,
+    "atrMult3": 0.3,
+    "wick3": false,
+    "minPts": 0
+  },
+  "symbols": {
+    "Volatility 15 (1s) Index": {
+      "spread": 0.552,
+      "exit": {
+        "slMarginPts": 5,
+        "tpPts": 66,
+        "beTriggerPts": 10,
+        "beLevelPts": 0,
+        "uniqueTrade": true
+      }
+    }
+  }
+}

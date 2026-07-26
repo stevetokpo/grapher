@@ -3,7 +3,7 @@ import styles from './AppHeader.module.css';
 
 export default function AppHeader({
   symbols, symbolId, onSymbolChange,
-  onImport, onManage, onSettings, onReplay, onRsi, onChat, onBacktest, onAlerts,
+  onImport, onManage, onSettings, onReplay, onRsi, onChat, onBacktest, onAlerts, onRfvg,
   isReplayMode = false,
   replaySymbolName = '',
   isRsiMode = false,
@@ -70,6 +70,15 @@ export default function AppHeader({
                 <polyline points="15,7 21,7 21,13"/>
               </svg>
               Backtest
+            </button>
+          )}
+          {onRfvg && (
+            <button className={styles.rfvgBtn} onClick={onRfvg} aria-label="Réglages rFVG par symbole">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ marginRight: 5 }}>
+                <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3" />
+                <path d="M1 14h6M9 8h6M17 16h6" />
+              </svg>
+              rFVG
             </button>
           )}
           {onChat && (

@@ -137,6 +137,7 @@ export default function Home() {
         onReplay={() => setShowReplay(true)}
         onRsi={() => router.push('/rsi')}
         onBacktest={() => router.push('/backtest')}
+        onRfvg={() => router.push('/rfvg')}
         onChat={() => setShowChat(true)}
         onAlerts={() => setShowAlerts(true)}
       />

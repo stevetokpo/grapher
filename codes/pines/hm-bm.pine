@@ -1,0 +1,100 @@
+//@version=6
+// ─────────────────────────────────────────────────────────────────────────────
+// HM-BM — motif 2 bougies (indicateur d'affichage + niveau d'entrée + SL)
+//
+// MOTIF (2 bougies consécutives), mesuré contre UN SEUL ATR de référence, lu
+// AVANT la bougie 1 pour ne pas s'auto-inclure :
+//   • Bougie 1 — grosse bougie directionnelle à CONTRE-COURANT de la MM75 :
+//       - HM : HAUSSIÈRE et entièrement SOUS la MM75 (high < MM75)   → biais HAUSSIER
+//       - BM : BAISSIÈRE et entièrement AU-DESSUS de la MM75 (low > MM75) → biais BAISSIER
+//     avec corps |close−open| ≥ mult1 × ATR   (mult1 = 1.0 par défaut)
+//   • Bougie 2 (M) — petite : corps |close−open| ≤ mult2 × ATR (mult2 = 0.5),
+//     sans contrainte de sens ni de position.
+//
+// SIGNAL : la bougie SUIVANTE (la 3e, notée X) est le NIVEAU D'ENTRÉE = son
+// ouverture. À la clôture de X, le STOP LOSS est à l'extrême entre M et X :
+//   • HMX (haussier) : SL = plus bas entre M et X   = min(low[M], low[X])
+//   • BMX (baissier) : SL = plus haut entre M et X   = max(high[M], high[X])
+// (la grosse bougie 1 n'entre pas dans le SL). Simple indicateur d'affichage.
+//
+// AFFICHAGE SANS LIMITE — tout est rendu par plot / plotshape / bgcolor (et non
+// par des objets box/line/label, plafonnés à 500) : le motif s'affiche donc sur
+// TOUTES les bougies chargées du graphe. Détection à offsets fixes, anti-repaint
+// (hors dernière bougie en formation) : bougie1=[1], bougie2=[0], ATR réf=[2].
+// ─────────────────────────────────────────────────────────────────────────────
+indicator("HM-BM — motif 2 bougies", "HM-BM", overlay = true)
+
+// ── Détection ────────────────────────────────────────────────────────────────
+grpDet    = "Détection"
+maPeriod  = input.int(75, "MM — période (SMA)", minval = 1, group = grpDet)
+atrPeriod = input.int(14, "ATR — période",      minval = 1, group = grpDet)
+mult1     = input.float(1.0, "Bougie 1 — corps ≥ ATR ×", minval = 0, step = 0.1, group = grpDet)
+mult2     = input.float(0.5, "Bougie 2 — corps ≤ ATR ×", minval = 0, step = 0.1, group = grpDet)
+direction = input.string("both", "Direction", options = ["both", "bull", "bear"], group = grpDet)
+
+// ── Affichage ────────────────────────────────────────────────────────────────
+grpAff       = "Affichage"
+showMa       = input.bool(true, "Tracer la MM75",   group = grpAff)
+showZone     = input.bool(true, "Zone du motif (fond coloré)", group = grpAff)
+showPatLabel = input.bool(true, "Marqueur HM / BM", group = grpAff)
+showEntry    = input.bool(true, "Niveau d'entrée (bougie X)", group = grpAff)
+showSL       = input.bool(true, "Stop loss (extrême M–X)",   group = grpAff)
+entryExtend  = input.int(5, "Longueur niveaux entrée / SL (bougies)", minval = 1, group = grpAff)
+bullCol      = input.color(#26A69A, "Haussier (HM)", group = grpAff)
+bearCol      = input.color(#EF5350, "Baissier (BM)", group = grpAff)
+slCol        = input.color(#B22222, "Couleur du SL", group = grpAff)
+
+// ── Alertes ──────────────────────────────────────────────────────────────────
+useAlerts = input.bool(false, "Alerte sur niveau d'entrée", group = "Alertes")
+
+// ── Séries ───────────────────────────────────────────────────────────────────
+ma     = ta.sma(close, maPeriod)
+atrVal = ta.atr(atrPeriod)
+plot(showMa ? ma : na, "MM75", color = color.new(color.gray, 0))
+
+// ── Détection « le motif se complète sur CETTE bougie » ──────────────────────
+// bougie 1 = [1], bougie 2 (M) = [0], ATR de référence = [2].
+maH   = ma[1]
+atrH  = atrVal[2]
+okH   = not na(maH) and not na(atrH)
+big1  = math.abs(close[1] - open[1]) >= mult1 * atrH
+small = math.abs(close[0] - open[0]) <= mult2 * atrH
+hm    = okH and close[1] > open[1] and high[1] < maH and big1 and small and direction != "bear"
+bm    = okH and close[1] < open[1] and low[1]  > maH and big1 and small and direction != "bull"
+
+// ── Zone du motif : fond coloré sur la bougie 2 (offset 0) et la 1 (offset -1) ─
+bgcolor(showZone and hm ? color.new(bullCol, 88) : na, title = "Zone HM (M)")
+bgcolor(showZone and hm ? color.new(bullCol, 88) : na, offset = -1, title = "Zone HM (bougie 1)")
+bgcolor(showZone and bm ? color.new(bearCol, 88) : na, title = "Zone BM (M)")
+bgcolor(showZone and bm ? color.new(bearCol, 88) : na, offset = -1, title = "Zone BM (bougie 1)")
+
+// ── Marqueur HM / BM (texte inclus) sur la bougie 2 ──────────────────────────
+plotshape(showPatLabel and hm, title = "HM", style = shape.triangleup,   location = location.belowbar, color = bullCol, textcolor = bullCol, text = "HM", size = size.tiny)
+plotshape(showPatLabel and bm, title = "BM", style = shape.triangledown, location = location.abovebar, color = bearCol, textcolor = bearCol, text = "BM", size = size.tiny)
+
+// ── Entrée / SL : la bougie X suit la complétion (M = [1], X = [0]) ───────────
+// Niveaux « tenus » sur entryExtend bougies via un plot en segments (illimité).
+isXbull = hm[1]
+isXbear = bm[1]
+
+var float entryLvl = na
+var float slLvl    = na
+var color entryCol = na
+var int   hold     = 0
+
+if isXbull or isXbear
+    entryLvl := open[0]
+    slLvl    := isXbull ? math.min(low[0], low[1]) : math.max(high[0], high[1])
+    entryCol := isXbull ? bullCol : bearCol
+    hold     := entryExtend
+else if hold > 0
+    hold := hold - 1
+if hold <= 0
+    entryLvl := na
+    slLvl    := na
+
+plot(showEntry ? entryLvl : na, "Entrée", color = entryCol, style = plot.style_linebr, linewidth = 2)
+plot(showSL ? slLvl : na, "SL", color = slCol, style = plot.style_linebr, linewidth = 2)
+
+if useAlerts and (isXbull or isXbear)
+    alert((isXbull ? "HM haussier" : "BM baissier") + " — niveau d'entrée", alert.freq_once_per_bar)

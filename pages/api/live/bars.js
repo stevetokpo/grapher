@@ -10,7 +10,13 @@ import { evaluateAlerts } from '../../../lib/notify/evaluate';
 // Pas de plafond de bougies par requête : un backfill de plusieurs mois doit
 // passer — corps accepté jusqu'à 64 Mo (~1 M de bougies M1), insertion par
 // paquets internes pour garder des requêtes SQL raisonnables.
-// → { ok, symbolId, received, lastTs }
+// → { ok, symbolId, received, stored, batchLastTs, lastTs }
+//   stored : bougies réellement en base sur la plage du lot après insertion.
+//     stored >= received est la garantie que rien du lot n'a été perdu ;
+//     l'EA n'avance son curseur qu'à cette condition (voir GrapherFeeder.mq5).
+//   batchLastTs : dernière bougie DU LOT — à ne pas confondre avec lastTs, qui
+//     est le max du symbole entier et serait faux comme curseur pendant le
+//     comblement d'un trou ancien.
 
 export const config = { api: { bodyParser: { sizeLimit: '64mb' } } };
 
@@ -65,13 +71,37 @@ export default async function handler(req, res) {
     );
     const lastTs = Number(last);
 
+    // Accusé de réception vérifiable : ce qui est réellement en base sur la
+    // plage du lot. L'EA refuse d'avancer si le compte est inférieur à l'envoi.
+    let batchFirstTs = rows[0].ts, batchLastTs = rows[0].ts;
+    for (const r of rows) {                      // boucle : un lot peut faire 1 M de lignes,
+      if (r.ts < batchFirstTs) batchFirstTs = r.ts;   // le spread de Math.min y casserait la pile
+      if (r.ts > batchLastTs)  batchLastTs  = r.ts;
+    }
+    // ::BIGINT obligatoire : le driver lie les nombres JS en DOUBLE, que
+    // make_timestamp refuse.
+    const [{ stored }] = await query(
+      `SELECT count(*)::BIGINT AS stored FROM bars_m1
+        WHERE symbol_id = ? AND ts BETWEEN make_timestamp(?::BIGINT) AND make_timestamp(?::BIGINT)`,
+      symbolId, batchFirstTs * 1000000, batchLastTs * 1000000,
+    );
+
     // Évaluation des alertes : délibérément SANS await. L'EA poste toutes les
     // 2 s et ne doit pas attendre un SMTP ou un appel Telegram. La promesse
     // flottante va au bout parce que Next tourne ici en process long-vivant
     // (et non en serverless, où il faudrait un waitUntil).
-    evaluateAlerts(symbolId, lastTs).catch(err => console.error('[notify]', err));
+    // Sautée pour un lot purement historique (comblement de trou) : il ne
+    // contient pas la bougie la plus récente, il n'y a rien à évaluer et un
+    // backfill enchaîne des centaines de lots.
+    if (batchLastTs >= lastTs) {
+      evaluateAlerts(symbolId, lastTs).catch(err => console.error('[notify]', err));
+    }
 
-    res.json({ ok: true, symbolId, received: rows.length, lastTs });
+    res.json({
+      ok: true, symbolId,
+      received: rows.length, stored: Number(stored),
+      batchLastTs, lastTs,
+    });
   } catch (err) {
     console.error('[live/bars]', err);
     res.status(500).json({ error: err.message });

@@ -6,19 +6,29 @@
 //|  Grapher — cf. pines/rFVG.pine pour la version TradingView.      |
 //|                                                                  |
 //|  MOTIF DE BASE (3 bougies) — la bougie CENTRALE, directionnelle  |
-//|  et large, laisse un gap béant :                                 |
-//|    • baissier : centrale baissière, et plus_bas(précédente) >    |
-//|      plus_haut(suivante)   → zone [haut suivante ; bas préc.]    |
-//|    • haussier : centrale haussière, et plus_haut(précédente) <   |
-//|      plus_bas(suivante)    → zone [haut préc. ; bas suivante]    |
+//|  et large, creuse un gap entre les deux bougies qui l'encadrent :|
+//|    • baissier : centrale baissière,                              |
+//|      gap = plus_bas(précédente) − plus_haut(suivante)            |
+//|    • haussier : centrale haussière,                              |
+//|      gap = plus_bas(suivante)   − plus_haut(précédente)          |
+//|    gap > 0 → VIDE : la zone est l'espace laissé entre elles.     |
+//|    gap < 0 → CHEVAUCHEMENT : elles se recouvrent, la zone est    |
+//|      leur bande commune (mêmes bornes, dans l'autre ordre).      |
+//|    « Gap minimum » est SIGNÉ et décide seul de ce qui passe :    |
+//|      0 = vide strict (motif classique) · négatif = chevauchement |
+//|      toléré jusque-là. Un gap nul est rejeté (zone plate).       |
 //|    Taille : la centrale doit mesurer >= x × ATR(période), l'ATR  |
 //|    étant lu AVANT elle (sinon il contiendrait la bougie jugée).  |
 //|                                                                  |
-//|  rFVG vs aFVG — un seul critère les sépare : en mode rFVG la     |
-//|  centrale est entièrement à CONTRE-COURANT de son côté de la     |
-//|  MM50 (baissière entièrement au-dessus, haussière entièrement    |
-//|  en dessous), sans la toucher. En mode « Toutes », la MM n'est   |
-//|  plus un filtre mais sert encore à étiqueter chaque boîte.       |
+//|  rFVG vs aFVG — la centrale doit être ENTIÈREMENT à contre-      |
+//|  courant de son sens, sans toucher NI la MM rapide NI la MM      |
+//|  lente (les deux à la fois) : baissière au-dessus des deux MM,   |
+//|  haussière en dessous des deux. En mode « Toutes », la position  |
+//|  vs MM n'est plus un filtre mais sert encore à étiqueter.        |
+//|                                                                  |
+//|  MODES : rFVG (retournements seuls) · Toutes (aFVG ⊇ rFVG,       |
+//|  étiquetées) · Super (rFVG dont la 3e bougie referme le gap à    |
+//|  CONTRE-SENS du motif → superFVG).                               |
 //|                                                                  |
 //|  Pas de mitigation, pas d'inversion : chaque zone est une boîte  |
 //|  tirée à droite sur extLen bougies, puis coupée net.             |
@@ -28,45 +38,53 @@
 //|  remplis) qu'une fois la bougie i+1 CLOSE. Une zone tracée ne    |
 //|  disparaît jamais.                                               |
 //|                                                                  |
-//|  BUFFERS (pour l'EA, via iCustom/CopyBuffer) — les valeurs sont  |
-//|  posées à l'index de la bougie CENTRALE :                        |
-//|    0  MM simple (ligne)                                          |
-//|    1  Side : +1 haussier / -1 baissier / 0 rien                  |
-//|    2  Top de la zone (0 si rien)                                 |
-//|    3  Bottom de la zone (0 si rien)                              |
-//|    4  1 = rFVG, 0 = aFVG (lu seulement si Side != 0)             |
+//|  BUFFERS (pour l'EA, via iCustom/CopyBuffer) — les valeurs de    |
+//|  signal sont posées à l'index de la bougie CENTRALE :            |
+//|    0  MM rapide (ligne)                                          |
+//|    1  MM lente (ligne)                                           |
+//|    2  Side : +1 haussier / -1 baissier / 0 rien                  |
+//|    3  Top de la zone (0 si rien)                                 |
+//|    4  Bottom de la zone (0 si rien)                              |
+//|    5  1 = rFVG/superFVG, 0 = aFVG (lu seulement si Side != 0)    |
 //|  Côté EA : à l'ouverture d'une bougie, le dernier motif confirmé |
 //|  a sa centrale au shift 2 (sa « suivante » vient de clore).      |
 //+------------------------------------------------------------------+
 #property copyright   "Grapher — portage de lib/patterns.js (calcRFVG)"
-#property version     "1.00"
+#property version     "2.00"
 #property description "rFVG / aFVG — Fair Value Gaps de retournement."
 #property description "Gap 3 bougies creusé par une centrale large (>= x ATR),"
-#property description "à contre-courant de la MM50 (rFVG) ou partout (aFVG)."
+#property description "à contre-courant des DEUX MM (rFVG) ou partout (aFVG)."
 #property indicator_chart_window
-#property indicator_buffers 5
-#property indicator_plots   5
+#property indicator_buffers 6
+#property indicator_plots   6
 
-#property indicator_label1  "MM"
+#property indicator_label1  "MM rapide"
 #property indicator_type1   DRAW_LINE
-#property indicator_color1  clrGray
+#property indicator_color1  clrDarkOrange
 #property indicator_style1  STYLE_SOLID
 #property indicator_width1  1
 
-#property indicator_label2  "Side (+1 bull / -1 bear)"
-#property indicator_type2   DRAW_NONE
-#property indicator_label3  "Zone top"
+#property indicator_label2  "MM lente"
+#property indicator_type2   DRAW_LINE
+#property indicator_color2  clrDodgerBlue
+#property indicator_style2  STYLE_SOLID
+#property indicator_width2  1
+
+#property indicator_label3  "Side (+1 bull / -1 bear)"
 #property indicator_type3   DRAW_NONE
-#property indicator_label4  "Zone bottom"
+#property indicator_label4  "Zone top"
 #property indicator_type4   DRAW_NONE
-#property indicator_label5  "rFVG (1) / aFVG (0)"
+#property indicator_label5  "Zone bottom"
 #property indicator_type5   DRAW_NONE
+#property indicator_label6  "rFVG/superFVG (1) / aFVG (0)"
+#property indicator_type6   DRAW_NONE
 
 //--- énumérations (mêmes options que calcRFVG)
 enum ENUM_RFVG_MODE
   {
-   RFVG_ONLY = 0, // Seuls les rFVG
-   RFVG_ALL  = 1  // Toutes (aFVG)
+   RFVG_ONLY  = 0, // Seuls les rFVG
+   RFVG_ALL   = 1, // Toutes (aFVG)
+   RFVG_SUPER = 2  // Super (3e bougie à contre-sens)
   };
 enum ENUM_RFVG_DIR
   {
@@ -84,16 +102,17 @@ enum ENUM_RFVG_SIZE
 input group "Détection"
 input ENUM_RFVG_MODE InpMode      = RFVG_ONLY;  // Motifs retenus
 input ENUM_RFVG_DIR  InpDirection = DIR_BOTH;   // Direction
-input int            InpMaPeriod  = 50;         // MM simple — période
+input int            InpMaFast    = 15;         // MM rapide — période
+input int            InpMaSlow    = 200;        // MM lente — période
 input ENUM_RFVG_SIZE InpSizeMode  = SIZE_RANGE; // Mesure de la taille de la centrale
 input int            InpAtrPeriod = 14;         // ATR — période
 input double         InpAtrMult   = 1.5;        // Taille centrale >= ATR × (0 = filtre off)
-input double         InpMinGap    = 0.0;        // Gap minimum (unités de prix, 0 = tous)
+input double         InpMinGap    = 0.0;        // Gap minimum (prix, SIGNÉ : <0 = chevauchement toléré)
 
 input group "Affichage"
 input int    InpExtLen      = 20;               // Extension max (bougies)
 input bool   InpShowLabel   = true;             // Label dans la boîte
-input bool   InpShowMa      = true;             // Tracer la MM
+input bool   InpShowMa      = false;            // Tracer les MM
 input color  InpBullColor   = C'38,166,154';    // Couleur haussière (#26A69A)
 input color  InpBearColor   = C'239,83,80';     // Couleur baissière (#EF5350)
 input bool   InpFill        = true;             // Remplir les boîtes
@@ -103,10 +122,11 @@ input group "Alertes"
 input bool   InpAlerts = false;                 // Alert() sur nouvelle zone confirmée
 
 //--- buffers
-double BufMa[], BufSide[], BufTop[], BufBottom[], BufIsR[];
+double BufMaFast[], BufMaSlow[], BufSide[], BufTop[], BufBottom[], BufIsR[];
 
 //--- état
-double g_ma[];               // MM simple, EMPTY_VALUE avant la période
+double g_maFast[];           // MM rapide, EMPTY_VALUE avant la période
+double g_maSlow[];           // MM lente, EMPTY_VALUE avant la période
 double g_atr[];              // ATR de Wilder, EMPTY_VALUE avant la période
 int    g_done = 1;           // prochaine bougie centrale à examiner
 long   g_openCentral[];      // zones dont le bord droit n'est pas encore figé
@@ -117,20 +137,23 @@ const string PREFIX = "rFVG#";
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   SetIndexBuffer(0, BufMa,     INDICATOR_DATA);
-   SetIndexBuffer(1, BufSide,   INDICATOR_DATA);
-   SetIndexBuffer(2, BufTop,    INDICATOR_DATA);
-   SetIndexBuffer(3, BufBottom, INDICATOR_DATA);
-   SetIndexBuffer(4, BufIsR,    INDICATOR_DATA);
+   SetIndexBuffer(0, BufMaFast, INDICATOR_DATA);
+   SetIndexBuffer(1, BufMaSlow, INDICATOR_DATA);
+   SetIndexBuffer(2, BufSide,   INDICATOR_DATA);
+   SetIndexBuffer(3, BufTop,    INDICATOR_DATA);
+   SetIndexBuffer(4, BufBottom, INDICATOR_DATA);
+   SetIndexBuffer(5, BufIsR,    INDICATOR_DATA);
 
-   ArraySetAsSeries(BufMa, false);
-   ArraySetAsSeries(BufSide, false);
-   ArraySetAsSeries(BufTop, false);
+   ArraySetAsSeries(BufMaFast, false);
+   ArraySetAsSeries(BufMaSlow, false);
+   ArraySetAsSeries(BufSide,   false);
+   ArraySetAsSeries(BufTop,    false);
    ArraySetAsSeries(BufBottom, false);
-   ArraySetAsSeries(BufIsR, false);
+   ArraySetAsSeries(BufIsR,    false);
 
    PlotIndexSetDouble(0, PLOT_EMPTY_VALUE, EMPTY_VALUE);
-   for(int p = 1; p <= 4; p++)
+   PlotIndexSetDouble(1, PLOT_EMPTY_VALUE, EMPTY_VALUE);
+   for(int p = 2; p <= 5; p++)
       PlotIndexSetDouble(p, PLOT_EMPTY_VALUE, 0.0);
 
    IndicatorSetString(INDICATOR_SHORTNAME, "rFVG/aFVG");
@@ -149,17 +172,15 @@ void OnDeinit(const int reason)
 //| MM simple sur les clôtures — comme smaArr() : définie à partir   |
 //| de l'index period-1, EMPTY_VALUE avant.                          |
 //+------------------------------------------------------------------+
-void ComputeMa(const double &close[], const int total)
+void ComputeSma(const double &close[], const int total, const int period, double &dst[])
   {
-   const int period = InpMaPeriod;
-   ArrayResize(g_ma, total);
+   ArrayResize(dst, total);
    double sum = 0;
    for(int i = 0; i < total; i++)
      {
       sum += close[i];
       if(i >= period)     sum -= close[i - period];
-      g_ma[i]  = (i >= period - 1) ? sum / period : EMPTY_VALUE;
-      BufMa[i] = InpShowMa ? g_ma[i] : EMPTY_VALUE;
+      dst[i] = (i >= period - 1) ? sum / period : EMPTY_VALUE;
      }
   }
 
@@ -317,10 +338,16 @@ int OnCalculate(const int rates_total,
       ArrayInitialize(BufIsR,    0.0);
      }
 
-   ComputeMa(close, rates_total);
+   ComputeSma(close, rates_total, InpMaFast, g_maFast);
+   ComputeSma(close, rates_total, InpMaSlow, g_maSlow);
    ComputeAtr(high, low, close, rates_total);
+   for(int i = 0; i < rates_total; i++)
+     {
+      BufMaFast[i] = InpShowMa ? g_maFast[i] : EMPTY_VALUE;
+      BufMaSlow[i] = InpShowMa ? g_maSlow[i] : EMPTY_VALUE;
+     }
 
-   const bool onlyR  = (InpMode == RFVG_ONLY);
+   const bool onlyR  = (InpMode != RFVG_ALL);
    const bool useAtr = (InpAtrPeriod > 0 && InpAtrMult > 0);
 
    // La centrale i n'est jugée qu'une fois sa SUIVANTE (i+1) close, donc
@@ -328,37 +355,58 @@ int OnCalculate(const int rates_total,
    // en formation n'entre jamais dans le motif → aucun repaint.
    for(int i = g_done; i <= rates_total - 3; i++)
      {
-      // MM requise même en mode « Toutes » (fidèle à calcRFVG : avg == null → skip).
-      const double avg = g_ma[i];
-      if(avg == EMPTY_VALUE)
+      // MM requises même en mode « Toutes » (fidèle à calcRFVG : avg == null → skip).
+      const double avgFast = g_maFast[i];
+      const double avgSlow = g_maSlow[i];
+      if(avgFast == EMPTY_VALUE || avgSlow == EMPTY_VALUE)
          continue;
 
-      // Motif de base : centrale directionnelle + gap correspondant. Pas de MM ici.
-      const bool baseBear = close[i] < open[i] && low[i - 1]  > high[i + 1];
-      const bool baseBull = close[i] > open[i] && high[i - 1] < low[i + 1];
+      // Motif de base : centrale directionnelle. Le gap (vide ou chevauchement)
+      // est mesuré plus bas et filtré par InpMinGap. Pas de MM ici.
+      const bool baseBear = close[i] < open[i];
+      const bool baseBull = close[i] > open[i];
       if(!baseBear && !baseBull)
          continue;
 
-      // Condition de retournement : la centrale est entièrement du côté opposé
-      // à son sens, sans toucher la moyenne. Seule séparation rFVG / aFVG.
-      const bool maBear = low[i]  > avg;
-      const bool maBull = high[i] < avg;
+      // Retournement : la centrale entièrement du côté opposé à son sens, sans
+      // toucher NI la MM rapide NI la MM lente. Seule séparation rFVG / aFVG.
+      const bool maBear = low[i]  > avgFast && low[i]  > avgSlow;
+      const bool maBull = high[i] < avgFast && high[i] < avgSlow;
 
-      const bool isBear = baseBear && (!onlyR || maBear);
-      const bool isBull = baseBull && (!onlyR || maBull);
+      bool isBear = baseBear && (!onlyR || maBear);
+      bool isBull = baseBull && (!onlyR || maBull);
       if(!isBear && !isBull)
          continue;
+
+      // Mode Super : la 3e bougie (celle qui referme le gap) doit clôturer à
+      // contre-sens du motif.
+      if(InpMode == RFVG_SUPER)
+        {
+         if(isBear && !(close[i + 1] > open[i + 1])) isBear = false;
+         if(isBull && !(close[i + 1] < open[i + 1])) isBull = false;
+         if(!isBear && !isBull)
+            continue;
+        }
 
       if(InpDirection == DIR_BULL && !isBull) continue;
       if(InpDirection == DIR_BEAR && !isBear) continue;
 
-      const string lbl = (isBear ? maBear : maBull) ? "rFVG" : "aFVG";
+      const string lbl = (InpMode == RFVG_SUPER) ? "superFVG"
+                         : ((isBear ? maBear : maBull) ? "rFVG" : "aFVG");
 
-      const double top    = isBear ? low[i - 1]  : low[i + 1];
-      const double bottom = isBear ? high[i + 1] : high[i - 1];
+      // Les deux niveaux du motif et leur écart SIGNÉ : positif = vide entre la
+      // 1re et la 3e bougie, négatif = elles se chevauchent et la zone devient
+      // leur bande commune (mêmes bornes, dans l'autre ordre). InpMinGap, lui
+      // aussi signé, décide de ce qui passe. Gap nul = zone plate, rejetée.
+      const double hiLvl = isBear ? low[i - 1]  : low[i + 1];
+      const double loLvl = isBear ? high[i + 1] : high[i - 1];
+      const double gap   = hiLvl - loLvl;
 
-      if(InpMinGap > 0 && top - bottom < InpMinGap)
+      if(gap == 0.0 || gap < InpMinGap)
          continue;
+
+      const double top    = (gap > 0.0) ? hiLvl : loLvl;
+      const double bottom = (gap > 0.0) ? loLvl : hiLvl;
 
       // Taille de la centrale vs ATR lu AVANT elle (i-1).
       if(useAtr)
@@ -376,7 +424,7 @@ int OnCalculate(const int rates_total,
       BufSide[i]   = isBear ? -1.0 : 1.0;
       BufTop[i]    = top;
       BufBottom[i] = bottom;
-      BufIsR[i]    = (lbl == "rFVG") ? 1.0 : 0.0;
+      BufIsR[i]    = (lbl == "aFVG") ? 0.0 : 1.0;
 
       DrawZone(time, rates_total, i, isBear, top, bottom, lbl);
 

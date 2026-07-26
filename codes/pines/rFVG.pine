@@ -1,0 +1,287 @@
+//@version=6
+// ─────────────────────────────────────────────────────────────────────────────
+// rFVG / aFVG — Fair Value Gaps de retournement  (+ positions SL/TP simulées)
+// Portage FIDÈLE de calcRFVG() (lib/patterns.js) de la plateforme Grapher.
+//
+// MOTIF DE BASE (3 bougies) — la CENTRALE, directionnelle et large, creuse le gap
+// entre les deux bougies qui l'encadrent :
+//   • baissier : centrale baissière, gap = bas(précédente) − haut(suivante)
+//   • haussier : centrale haussière, gap = bas(suivante)  − haut(précédente)
+//   gap > 0 → VIDE : la zone est l'espace laissé entre les deux bougies.
+//   gap < 0 → CHEVAUCHEMENT : elles se recouvrent, la zone est leur bande commune
+//             (mêmes bornes, inversées). Piloté par « Gap minimum », qui est SIGNÉ :
+//             0 = vide strict (classique), négatif = chevauchement toléré jusque-là.
+//             Un gap exactement nul est rejeté (zone plate).
+//   Taille : la centrale doit mesurer >= atrMult × ATR(atrPeriod), l'ATR étant
+//   lu AVANT elle (à central-1), sinon il contiendrait la bougie à juger.
+//
+// rFVG vs aFVG — la centrale doit être ENTIÈREMENT à contre-courant de son sens,
+//   sans toucher NI la MM rapide NI la MM lente (les deux à la fois) :
+//     • rFVG baissier : centrale baissière mais bas > MMrapide ET bas > MMlente
+//     • rFVG haussier : centrale haussière mais haut < MMrapide ET haut < MMlente
+//
+// MODES : rfvg (retournements seuls) · all (tout, étiqueté rFVG/aFVG) ·
+//   super (rFVG dont la 3e bougie referme le gap à CONTRE-SENS → superFVG).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// POSITIONS (issue simulée, style TradesPrimitive) — dérivé de calcRFVGPositions,
+// avec deux déviations DEMANDÉES sur l'entrée, pilotées par le sens de la 3e bougie
+// (celle qui referme le gap) vs le sens du rFVG :
+//   • 3e bougie À CONTRE-SENS du rFVG (haussier + 3e baissière, ou l'inverse — le
+//     cas « super ») → ENTRÉE MARCHÉ automatique à l'OUVERTURE de la bougie suivante.
+//   • 3e bougie DANS LE SENS du rFVG → ORDRE LIMITE au niveau d'OUVERTURE de la 3e
+//     bougie ; rempli seulement si une bougie ultérieure y revient (achat : bas <=
+//     entrée ; vente : haut >= entrée). (La plateforme, elle, prend close en limite.)
+//   • EXPIRATION (limite seulement) : non rempli dans `expiry` bougies après la
+//     centrale → « missed ». L'entrée marché ne connaît pas d'expiration.
+//   • Une fois rempli : SL/TP en points de prix ; stop testé AVANT le TP
+//     (pessimiste) ; BREAK-EVEN optionnel (déplace le stop dès un profit donné).
+//   • Couleur du trait d'entrée : vert tp · rouge sl/be · gris pointillé missed ·
+//     argent = en attente (pointillé) ou position ouverte (plein).
+//
+// ANTI-REPAINT : détection et avancement des positions ne se font qu'à la clôture
+// confirmée (barstate.isconfirmed). Sur bougie confirmée : centrale=[1], préc.=[2],
+// suivante/3e=[0]. Une zone tracée ne bouge plus ; une position résolue est figée.
+// ─────────────────────────────────────────────────────────────────────────────
+indicator("rFVG / aFVG — Fair Value Gaps de retournement", "rFVG/aFVG", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
+
+// ── Détection (mêmes options que calcRFVG) ───────────────────────────────────
+grpDet       = "Détection"
+mode         = input.string("rfvg", "Motifs retenus", options = ["rfvg", "all", "super"], group = grpDet, tooltip = "rfvg : retournements seuls · all : tout, étiqueté rFVG/aFVG · super : rFVG dont la 3e bougie referme le gap à contre-sens")
+direction    = input.string("both", "Direction",       options = ["both", "bull", "bear"], group = grpDet)
+maPeriodFast = input.int(15,  "MM rapide — période",   minval = 1, group = grpDet)
+maPeriodSlow = input.int(200, "MM lente — période",    minval = 1, group = grpDet)
+atrPeriod    = input.int(14,  "ATR — période",         minval = 0, group = grpDet)
+atrMult      = input.float(1.5, "Taille centrale ≥ ATR ×", minval = 0, step = 0.1, group = grpDet, tooltip = "0 = filtre de taille désactivé")
+sizeMode     = input.string("range", "Mesure de la taille", options = ["range", "body"], group = grpDet, tooltip = "range : amplitude haut-bas · body : corps |clôture-ouverture|")
+minPts       = input.float(0.0, "Gap minimum (prix, signé)", step = 0.1, group = grpDet, tooltip = "Seuil SIGNÉ du gap entre la 1re et la 3e bougie. 0 = vrai vide exigé (motif classique) · négatif = accepte qu'elles se chevauchent jusqu'à cette profondeur, la zone devient alors la bande commune aux deux bougies au lieu du vide.")
+
+// ── Affichage (zones) ────────────────────────────────────────────────────────
+grpAff     = "Affichage"
+extLen     = input.int(20, "Extension (bougies)", minval = 1, group = grpAff)
+showZone   = input.bool(true,  "Afficher les zones",  group = grpAff)
+showLabel  = input.bool(true,  "Label dans la boîte", group = grpAff)
+showMa     = input.bool(false, "Tracer les MM",       group = grpAff)
+bullCol    = input.color(#26A69A, "Couleur haussière", group = grpAff)
+bearCol    = input.color(#EF5350, "Couleur baissière", group = grpAff)
+fillZone   = input.bool(true, "Remplir les boîtes",    group = grpAff)
+fillTransp = input.int(80, "Transparence du remplissage", minval = 0, maxval = 100, group = grpAff)
+
+// ── Positions (SL / TP simulés) ──────────────────────────────────────────────
+grpPos     = "Positions (SL / TP)"
+showPos    = input.bool(true,  "Afficher les positions", group = grpPos)
+slPts      = input.float(10.0, "SL — distance (prix)",   minval = 0, step = 0.1, group = grpPos, tooltip = "Distance du stop depuis l'entrée, en unités de prix")
+tpPts      = input.float(10.0, "TP — distance (prix)",   minval = 0, step = 0.1, group = grpPos, tooltip = "Distance de l'objectif depuis l'entrée, en unités de prix")
+expiryBars = input.int(20,     "Expiration de l'ordre (bougies)", minval = 1, group = grpPos, tooltip = "L'ordre limite meurt s'il n'est pas rempli dans ce nombre de bougies après la centrale")
+beTrigger  = input.float(0.0,  "Break-even — seuil (prix, 0 = off)", minval = 0, step = 0.1, group = grpPos, tooltip = "Profit à partir duquel le stop est déplacé au niveau BE")
+beLevel    = input.float(0.0,  "Break-even — niveau du stop (prix vs entrée)", step = 0.1, group = grpPos, tooltip = "0 = entrée exacte · positif = gain verrouillé · négatif = perte réduite")
+beCol      = input.color(color.orange, "Couleur break-even", group = grpPos)
+showPosLbl = input.bool(false, "Label d'issue (tp/sl/be/missed)", group = grpPos)
+
+// ── Alertes ──────────────────────────────────────────────────────────────────
+useAlerts = input.bool(false, "Alerte sur nouvelle zone confirmée", group = "Alertes")
+
+// ── Séries auxiliaires (alignées, comme smaArr / atrArr) ─────────────────────
+maFast = ta.sma(close, maPeriodFast)
+maSlow = ta.sma(close, maPeriodSlow)
+useAtr = atrPeriod > 0 and atrMult > 0
+atrVal = ta.atr(atrPeriod)
+
+plot(showMa ? maFast : na, "MM rapide", color = color.new(color.orange, 0))
+plot(showMa ? maSlow : na, "MM lente",  color = color.new(color.blue, 0))
+
+// ── Type position + helpers de dessin ────────────────────────────────────────
+type Trade
+    bool   isBuy
+    bool   marketEntry     // true : entrée marché à l'ouverture suivante (3e contra)
+    float  entry
+    float  sl
+    float  tp
+    float  beStop
+    int    centralIdx
+    int    entryIdx        // bar_index de la 3e bougie (ordre posé ici)
+    int    fillDeadline    // centralIdx + expiry : au-delà, l'ordre limite expire
+    int    state           // 0 en attente · 1 remplie · 2 close
+    string reason          // "pending" · "missed" · "sl" · "tp" · "be"
+    int    fillIdx
+    int    exitIdx
+    bool   beActive
+    line   lnEntry
+    line   lnSl
+    line   lnTp
+
+extendTrade(Trade t, int x2) =>
+    if not na(t.lnEntry)
+        line.set_x2(t.lnEntry, x2)
+    if not na(t.lnSl)
+        line.set_x2(t.lnSl, x2)
+    if not na(t.lnTp)
+        line.set_x2(t.lnTp, x2)
+
+closeTrade(Trade t) =>
+    extendTrade(t, t.exitIdx)
+    col = t.reason == "tp" ? bullCol : (t.reason == "sl" or t.reason == "be") ? bearCol : color.new(color.gray, 20)
+    if not na(t.lnEntry)
+        line.set_color(t.lnEntry, col)
+        line.set_style(t.lnEntry, t.reason == "missed" ? line.style_dotted : line.style_solid)
+    if showPosLbl and not na(t.lnEntry)
+        label.new(t.exitIdx, t.entry, t.reason, xloc = xloc.bar_index, style = label.style_none, textcolor = col, size = size.tiny)
+
+// Positions vivantes (en attente ou remplies). Les positions closes sont retirées
+// du tableau chaque barre — leurs traits, eux, restent tracés sur le graphique.
+var array<Trade> trades = array.new<Trade>()
+
+// ── Boucle principale, uniquement à la clôture confirmée ─────────────────────
+onlyR   = mode != "all"
+avgFast = maFast[1]              // MM rapide à la centrale
+avgSlow = maSlow[1]              // MM lente à la centrale
+atrRef  = atrVal[2]             // ATR lu AVANT la centrale (central-1)
+
+if barstate.isconfirmed
+    // ── 1) Avancer les positions vivantes avec la bougie qui vient de clore ([0])
+    j  = bar_index
+    hH = high[0]
+    lL = low[0]
+    if array.size(trades) > 0
+        for idx = 0 to array.size(trades) - 1
+            t = array.get(trades, idx)
+            if t.state != 2
+                // En attente : tenter le remplissage, ou expirer.
+                if t.state == 0
+                    if t.marketEntry
+                        // Entrée marché : remplie à l'OUVERTURE de la bougie qui suit
+                        // la 3e (soit la première barre traitée ici, j = entryIdx+1).
+                        t.entry   := open[0]
+                        t.sl      := t.isBuy ? t.entry - slPts : t.entry + slPts
+                        t.tp      := t.isBuy ? t.entry + tpPts : t.entry - tpPts
+                        t.beStop  := t.isBuy ? t.entry + beLevel : t.entry - beLevel
+                        t.state   := 1
+                        t.fillIdx := j
+                        t.lnEntry := line.new(t.entryIdx, t.entry, j, t.entry, xloc = xloc.bar_index, color = color.new(color.silver, 0), width = 1, style = line.style_solid)
+                        t.lnSl := line.new(j, t.sl, j, t.sl, xloc = xloc.bar_index, color = bearCol, style = line.style_dashed)
+                        t.lnTp := line.new(j, t.tp, j, t.tp, xloc = xloc.bar_index, color = bullCol, style = line.style_dashed)
+                    else if j > t.fillDeadline
+                        t.reason  := "missed"
+                        t.exitIdx := t.fillDeadline
+                        t.state   := 2
+                    else
+                        filled = t.isBuy ? lL <= t.entry : hH >= t.entry
+                        if filled
+                            t.state  := 1
+                            t.fillIdx := j
+                            t.lnSl := line.new(j, t.sl, j, t.sl, xloc = xloc.bar_index, color = bearCol, style = line.style_dashed)
+                            t.lnTp := line.new(j, t.tp, j, t.tp, xloc = xloc.bar_index, color = bullCol, style = line.style_dashed)
+                            line.set_style(t.lnEntry, line.style_solid)
+                // Remplie (éventuellement à l'instant) : résoudre sur cette bougie.
+                // Stop testé AVANT le TP (pessimiste), BE armé après.
+                if t.state == 1
+                    stop = t.beActive ? t.beStop : t.sl
+                    stopHit = t.isBuy ? lL <= stop : hH >= stop
+                    if stopHit
+                        t.exitIdx := j
+                        t.reason  := t.beActive ? "be" : "sl"
+                        t.state   := 2
+                    else
+                        tpHit = t.isBuy ? hH >= t.tp : lL <= t.tp
+                        if tpHit
+                            t.exitIdx := j
+                            t.reason  := "tp"
+                            t.state   := 2
+                        else if beTrigger > 0 and not t.beActive
+                            fav = t.isBuy ? hH - t.entry : t.entry - lL
+                            if fav >= beTrigger
+                                t.beActive := true
+                                line.set_y1(t.lnSl, t.beStop)
+                                line.set_y2(t.lnSl, t.beStop)
+                                line.set_color(t.lnSl, beCol)
+                                // Pessimisme : si la bougie d'armement a aussi traversé
+                                // le niveau BE, rien ne prouve l'ordre → sortie au BE.
+                                beCrossed = t.isBuy ? lL <= t.beStop : hH >= t.beStop
+                                if beCrossed
+                                    t.exitIdx := j
+                                    t.reason  := "be"
+                                    t.state   := 2
+                // Finaliser ou prolonger le tracé.
+                if t.state == 2
+                    closeTrade(t)
+                else
+                    extendTrade(t, j)
+        // Retirer les positions closes du tableau (leurs traits restent tracés).
+        for idx = array.size(trades) - 1 to 0
+            if array.get(trades, idx).state == 2
+                array.remove(trades, idx)
+
+    // ── 2) Détection d'un nouveau motif (centrale=[1], préc.=[2], suivante=[0])
+    if not na(avgFast) and not na(avgSlow)
+        // Motif de base : centrale directionnelle. Le gap (vide ou chevauchement)
+        // est mesuré plus bas et filtré par minPts. Pas de MM ici.
+        baseBear = close[1] < open[1]
+        baseBull = close[1] > open[1]
+
+        // Retournement : la centrale entièrement du côté opposé à son sens, sans
+        // toucher aucune des deux MM. Seule séparation rFVG / aFVG.
+        maBear = low[1]  > avgFast and low[1]  > avgSlow
+        maBull = high[1] < avgFast and high[1] < avgSlow
+
+        isBear = baseBear and (not onlyR or maBear)
+        isBull = baseBull and (not onlyR or maBull)
+
+        // Mode super : la 3e bougie (suivante) doit clôturer à contre-sens du motif.
+        if mode == "super"
+            if isBear and not (close[0] > open[0])
+                isBear := false
+            if isBull and not (close[0] < open[0])
+                isBull := false
+
+        proceed = isBear or isBull
+        if direction == "bull" and not isBull
+            proceed := false
+        if direction == "bear" and not isBear
+            proceed := false
+
+        if proceed
+            lbl    = mode == "super" ? "superFVG" : ((isBear ? maBear : maBull) ? "rFVG" : "aFVG")
+
+            // Les deux niveaux du motif et leur écart signé : positif = vide entre
+            // les bougies, négatif = elles se chevauchent et la zone devient la
+            // bande commune (mêmes bornes, dans l'autre ordre). Gap nul = zone
+            // plate, toujours rejetée.
+            hiLvl  = isBear ? low[2]  : low[0]
+            loLvl  = isBear ? high[0] : high[2]
+            gap    = hiLvl - loLvl
+            top    = gap > 0 ? hiLvl : loLvl
+            bottom = gap > 0 ? loLvl : hiLvl
+
+            gapOk   = gap != 0 and gap >= minPts
+            sizeVal = sizeMode == "body" ? math.abs(close[1] - open[1]) : high[1] - low[1]
+            atrOk   = not useAtr or (not na(atrRef) and sizeVal >= atrMult * atrRef)
+
+            if gapOk and atrOk
+                centralIdx = bar_index - 1
+                col        = isBear ? bearCol : bullCol
+
+                // Zone (boîte tirée à droite sur extLen, puis coupée).
+                if showZone
+                    box.new(centralIdx, top, centralIdx + extLen, bottom, border_color = col, bgcolor = fillZone ? color.new(col, fillTransp) : na, xloc = xloc.bar_index)
+                    if showLabel
+                        label.new(centralIdx, top, lbl, xloc = xloc.bar_index, yloc = yloc.price, style = label.style_label_down, color = color.new(col, 100), textcolor = col, size = size.small)
+
+                // Position : la 3e bougie ([0]) décide de la mécanique d'entrée.
+                if showPos and slPts > 0 and tpPts > 0
+                    isBuy = isBull
+                    // 3e bougie à contre-sens du rFVG → entrée marché (bougie suivante).
+                    // Sinon → ordre limite au niveau d'OUVERTURE de la 3e bougie.
+                    opp     = isBuy ? close[0] < open[0] : close[0] > open[0]
+                    entryPx = opp ? float(na) : open[0]
+                    slPx    = opp ? float(na) : (isBuy ? entryPx - slPts : entryPx + slPts)
+                    tpPx    = opp ? float(na) : (isBuy ? entryPx + tpPts : entryPx - tpPts)
+                    bePx    = opp ? float(na) : (isBuy ? entryPx + beLevel : entryPx - beLevel)
+                    t = Trade.new(isBuy = isBuy, marketEntry = opp, entry = entryPx, sl = slPx, tp = tpPx, beStop = bePx, centralIdx = centralIdx, entryIdx = bar_index, fillDeadline = centralIdx + expiryBars, state = 0, reason = "pending", fillIdx = na, exitIdx = na, beActive = false)
+                    // Ordre limite : trait d'entrée en attente (pointillé) dès maintenant.
+                    // Marché : le trait sera créé au remplissage, sur la bougie suivante.
+                    if not opp
+                        t.lnEntry := line.new(bar_index, entryPx, bar_index, entryPx, xloc = xloc.bar_index, color = color.new(color.silver, 0), width = 1, style = line.style_dotted)
+                    array.push(trades, t)
+
+                if useAlerts
+                    alert((isBear ? "rFVG baissier" : "rFVG haussier") + " confirmé", alert.freq_once_per_bar)

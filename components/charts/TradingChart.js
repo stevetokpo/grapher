@@ -4,9 +4,10 @@ import { calcMA, calcRSI, calcBB, calcSwings } from '../../lib/indicators';
 import { calcEquilibrium } from '../../lib/equilibrium';
 import { calcHarmony } from '../../lib/harmony';
 import { createHarmonyPrimitive } from './HarmonyPrimitive';
-import { calcTwinsBars, calcFVG, calcRFVG, calcRFVGPositions, calcHBHBHB, calcCompression, calcHBHB } from '../../lib/patterns';
+import { calcTwinsBars, calcFVG, calcRFVG, calcRFVGPositions, calcHBHBHB, calcCompression, calcHBHB, calcHMBM, calcHMBMPositions } from '../../lib/patterns';
 import { createFvgPrimitive } from './FvgPrimitive';
 import { createHbhPrimitive } from './HbhPrimitive';
+import { createHmbmPrimitive } from './HmbmPrimitive';
 import { createHbhbPrimitive } from './HbhbPrimitive';
 import { createCompressionPrimitive } from './CompressionPrimitive';
 import { createEquilibriumPrimitive } from './EquilibriumPrimitive';
@@ -160,6 +161,8 @@ export default function TradingChart({
   const rfvgPrimitiveRef        = useRef(null);
   const rfvgPosPrimitiveRef     = useRef(null);
   const hbhPrimitiveRef         = useRef(null);
+  const hmbmPrimitiveRef        = useRef(null);
+  const hmbmPosPrimitiveRef     = useRef(null);
   const hbhbPrimitiveRef        = useRef(null);
   const compressionPrimitiveRef = useRef(null);
   const tradesPrimitiveRef      = useRef(null);
@@ -195,6 +198,9 @@ export default function TradingChart({
   // le téléchargement JSON. Ref et non state : rien à re-rendre, le clic lit
   // simplement la dernière valeur — donc toujours à jour au dernier chargement.
   const rfvgReportRef = useRef(null);
+  // Moniteur / rapport HM-BM (mode « position »), même logique que le rFVG.
+  const [hmbmStats, setHmbmStats] = useState(null);
+  const hmbmReportRef = useRef(null);
   const shotTimerRef = useRef(null);
 
   const takeScreenshot = useCallback(async () => {
@@ -404,6 +410,8 @@ export default function TradingChart({
       rfvgPrimitiveRef.current = null;
       rfvgPosPrimitiveRef.current = null;
       hbhPrimitiveRef.current  = null;
+      hmbmPrimitiveRef.current = null;
+      hmbmPosPrimitiveRef.current = null;
       hbhbPrimitiveRef.current = null;
       compressionPrimitiveRef.current = null;
       tradesPrimitiveRef.current      = null;
@@ -1160,10 +1168,13 @@ export default function TradingChart({
     const detectOpts = {
       mode:      rfvg.mode      ?? 'rfvg',
       direction: rfvg.direction ?? 'both',
-      minPts:    rfvg.minPts    ?? 0,
-      maPeriod:  rfvg.maPeriod  ?? 50,
+      minPts:       rfvg.minPts       ?? 0,
+      maPeriodFast: rfvg.maPeriodFast ?? 15,
+      maPeriodSlow: rfvg.maPeriodSlow ?? 200,
       atrPeriod: rfvg.atrPeriod ?? 14,
       atrMult:   rfvg.atrMult   ?? 1.5,
+      atrMult3:  rfvg.atrMult3  ?? 0,
+      wick3:     rfvg.wick3     === true,
       sizeMode:  rfvg.sizeMode  ?? 'range',
       extLen:    rfvg.extLen    ?? 20,
     };
@@ -1193,35 +1204,72 @@ export default function TradingChart({
         rfvgPosPrimitiveRef.current = createTradesPrimitive();
         series.attachPrimitive(rfvgPosPrimitiveRef.current);
       }
-      const slPts        = rfvg.slPts        ?? 10;
-      const tpPts        = rfvg.tpPts        ?? 10;
-      const beTriggerPts = rfvg.beTriggerPts ?? 0;
-      const beLevelPts   = rfvg.beLevelPts   ?? 0;
+      const slMarginPts   = rfvg.slMarginPts   ?? 2;
+      const tpPts         = rfvg.tpPts         ?? 10;
+      const beTriggerPts  = rfvg.beTriggerPts  ?? 0;
+      const beTouchTrigger = rfvg.beTouchTrigger ?? 0;
+      const beBarsTrigger = rfvg.beBarsTrigger ?? 0;
+      const beLevelPts    = rfvg.beLevelPts    ?? 0;
       const posOpts = {
         ...detectOpts,
-        slPts, tpPts,
-        expiry: rfvg.expiry ?? 20,
-        beTriggerPts, beLevelPts,
+        slMarginPts, tpPts,
+        beTriggerPts, beTouchTrigger, beBarsTrigger, beLevelPts,
+        uniqueTrade: rfvg.uniqueTrade === true,
+        skipAfterTp: rfvg.skipAfterTp ?? 0,
       };
       const positions = calcRFVGPositions(candles, posOpts);
       rfvgPosPrimitiveRef.current.update(positions, null);
 
       // Le moniteur suit le même calcul que le dessin : il se met à jour tout
       // seul à chaque chargement de bougies (préchargement d'historique inclus).
-      let tp = 0, sl = 0, be = 0, missed = 0, open = 0;
+      // Le P&L se compte en POINTS : le lot est fixe, c'est lui qui est
+      // proportionnel au gain réel. Le seuil de rentabilité affiché est celui
+      // RÉALISÉ (perte moyenne / (gain + perte moyens)) — le 1/(1+RR) n'a de
+      // sens qu'à risque constant, ce que le stop structurel interdit.
+      let tp = 0, sl = 0, be = 0, open = 0;
+      let grossWin = 0, grossLoss = 0, nWin = 0, nLoss = 0, sumPts = 0, nRes = 0;
+      const durations = [];   // durée de vie en bougies, positions résolues
+      const touches   = [];   // retours sur le niveau d'entrée, positions résolues
       for (const p of positions) {
-        if      (p.status === 'tp')     tp++;
-        else if (p.status === 'sl')     sl++;
-        else if (p.status === 'be')     be++;
-        else if (p.status === 'missed') missed++;
-        else                            open++;
+        if      (p.status === 'tp') tp++;
+        else if (p.status === 'sl') sl++;
+        else if (p.status === 'be') be++;
+        else                      { open++; continue; }
+        const g = p.profitPoints;
+        sumPts += g; nRes++;
+        durations.push(p.barsHeld);
+        touches.push(p.entryTouches);
+        if (g > 0)      { grossWin  += g; nWin++; }
+        else if (g < 0) { grossLoss += -g; nLoss++; }
       }
-      setRfvgStats({ total: positions.length, tp, sl, be, missed, open, slPts, tpPts, beOn: beTriggerPts > 0 });
-      rfvgReportRef.current = {
-        params: posOpts,
-        stats:  { total: positions.length, tp, sl, be, missed, open },
-        positions,
-      };
+      durations.sort((a, b) => a - b);
+      const dMid = durations.length >> 1;
+      const avgWin  = nWin  ? grossWin  / nWin  : null;
+      const avgLoss = nLoss ? grossLoss / nLoss : null;
+      const expPts  = nRes  ? sumPts / nRes : null;
+      const beThresh = avgWin != null && avgLoss != null && avgWin + avgLoss > 0
+        ? avgLoss / (avgWin + avgLoss) : null;
+      const stats = { total: positions.length, tp, sl, be, open, expPts, beThresh,
+                      netPts: grossWin - grossLoss,
+                      profitFactor: grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? Infinity : null),
+                      // Durée de vie, en bougies. `onEntryBar` compte celles qui
+                      // se résolvent dans B4 même — la fenêtre sans stop.
+                      barsHeldMedian: durations.length === 0 ? null
+                        : durations.length % 2 ? durations[dMid] : (durations[dMid - 1] + durations[dMid]) / 2,
+                      barsHeldMean: durations.length ? durations.reduce((s, v) => s + v, 0) / durations.length : null,
+                      barsHeldMax:  durations.length ? durations[durations.length - 1] : null,
+                      onEntryBar:   durations.filter(v => v === 0).length,
+                      // Retours sur le niveau d'entrée. `neverReturned` = les
+                      // positions parties droit à leur sort, sans repasser par là.
+                      entryTouchesMean: touches.length ? touches.reduce((s, v) => s + v, 0) / touches.length : null,
+                      entryTouchesMax:  touches.length ? Math.max(...touches) : null,
+                      neverReturned:    touches.filter(v => v === 0).length,
+                      // Signaux sautés par le cooldown (hors rapport, juste comptés)
+                      // et combien auraient gagné.
+                      skippedByCooldown: positions.skippedByCooldown ?? 0,
+                      skippedWon:        positions.skippedWon ?? 0 };
+      setRfvgStats({ ...stats, beOn: beTriggerPts > 0 || beTouchTrigger > 0 || beBarsTrigger > 0 });
+      rfvgReportRef.current = { params: posOpts, stats, positions };
     }
   }, [candles, patterns]);
 
@@ -1232,25 +1280,56 @@ export default function TradingChart({
     if (!rep) return;
     const { params, stats, positions } = rep;
     const iso = t => t != null ? new Date(t * 1000).toISOString() : null;
-    const r   = pts => pts != null && params.slPts > 0 ? +(pts / params.slPts).toFixed(4) : null;
+    // Le stop est structurel : chaque position a SON risque. Le R se normalise
+    // donc position par position, il n'existe plus de SL global.
+    const rOf = (pts, risk0) => pts != null && risk0 > 0 ? +(pts / risk0).toFixed(4) : null;
 
     const resolved = stats.tp + stats.sl;
     const doc = {
-      pattern:     'rFVG — positions simulées (pré-entrée limite à la clôture de la 3e bougie)',
+      pattern:     'rFVG — positions simulées (entrée au marché à l\'ouverture de B4, stop structurel sous/sur l\'extrême B3-B4)',
       generatedAt: new Date().toISOString(),
       params,
+      // Champs listés un par un : un spread laisserait passer les valeurs
+      // brutes à côté de leurs versions arrondies. Tout est en POINTS.
       stats: {
-        ...stats,
-        winrate: resolved > 0 ? +(stats.tp / resolved).toFixed(4) : null,
-        rr:      params.slPts > 0 ? +(params.tpPts / params.slPts).toFixed(4) : null,
+        total:        stats.total,
+        tp:           stats.tp,
+        sl:           stats.sl,
+        be:           stats.be,
+        open:         stats.open,
+        winrate:      resolved > 0 ? +(stats.tp / resolved).toFixed(4) : null,
+        // Seuil de rentabilité réalisé, pas un 1/(1+RR) : le risque varie.
+        breakevenWinrate: stats.beThresh != null ? +stats.beThresh.toFixed(4) : null,
+        expectancyPts:    stats.expPts != null ? +stats.expPts.toFixed(4) : null,
+        netPts:           +stats.netPts.toFixed(4),
+        // JSON n'a pas d'infini : null quand il n'y a aucune perte.
+        profitFactor: stats.profitFactor != null && Number.isFinite(stats.profitFactor)
+          ? +stats.profitFactor.toFixed(4) : null,
+        barsHeldMedian: stats.barsHeldMedian,
+        barsHeldMean:   stats.barsHeldMean != null ? +stats.barsHeldMean.toFixed(2) : null,
+        barsHeldMax:    stats.barsHeldMax,
+        onEntryBar:     stats.onEntryBar,
+        entryTouchesMean: stats.entryTouchesMean != null ? +stats.entryTouchesMean.toFixed(2) : null,
+        entryTouchesMax:  stats.entryTouchesMax,
+        neverReturned:    stats.neverReturned,
+        // Cooldown : signaux sautés (hors rapport) et combien auraient gagné.
+        skippedByCooldown: stats.skippedByCooldown ?? 0,
+        skippedWon:        stats.skippedWon ?? 0,
       },
       conventions: {
-        unites:        'excursions en points et en R (points / SL)',
-        maxPullupPts:  "MFE — plus forte avancée dans le sens de la position, du remplissage à la sortie ; bougie de sortie EXCLUE pour une sortie sur stop ('sl' ou 'be') ; plafonnée au TP",
-        maxDrawdownPts:'MAE — plus forte avancée contre la position, bougie de sortie incluse (pessimiste), plafonnée au SL',
-        remplissage:   "l'ordre limite n'est pris que si une bougie revient toucher le niveau avant l'expiration ; status 'missed' = jamais pris",
+        unites:        "P&L en POINTS : le lot est fixe, c'est lui qui est proportionnel au gain réel — compter en R supposerait qu'on redimensionne la position à chaque trade pour risquer le même montant. Les champs en R restent fournis à titre indicatif (points / risk0), le risque variant d'une position à l'autre",
+        breakevenWinrate: "seuil de rentabilité RÉALISÉ = perte moyenne / (gain moyen + perte moyenne). Le 1/(1+RR) n'a de sens qu'à risque constant, ce que le stop structurel interdit",
+        entree:        "au marché à l'ouverture de B4, la bougie qui suit le motif — jamais d'ordre en attente, donc jamais de position ratée",
+        cooldown:      "skipAfterTp > 0 : après un TP réel, les N prochains signaux sont sautés (repos). Chaque signal sauté est simulé à blanc — s'il aurait aussi gagné, le compteur repart à N. Les trades sautés NE SONT PAS dans `positions` (juste comptés) : skippedByCooldown = combien sautés, skippedWon = combien auraient gagné. Anti-lookahead : un signal n'est sauté que s'il entre après la sortie du gain qui a armé le repos",
+        tradeUnique:   "uniqueTrade = true : une seule position à la fois. Tout motif survenant avant la clôture de la position en cours est ignoré (dans son sens comme à contre-sens) et n'apparaît nulle part — les positions listées ici sont donc déjà filtrées",
+        stop:          "posé à la CLÔTURE de B4 : BUY → min(bas B3, bas B4) − marge ; SELL → max(haut B3, haut B4) + marge. Pendant B4 la position est non protégée, seul le TP est actif — le stop étant construit sous l'extrême de B4, il ne peut pas y être touché",
+        barsHeld:      "durée de vie de la position, en PÉRIODES du graphe (bougies) écoulées entre l'entrée et la sortie. 0 = ouverte et refermée dans B4, sa propre bougie d'entrée — donc entièrement dans la fenêtre où le stop n'existe pas encore. `onEntryBar` en donne le compte",
+        entryTouches:  "combien de fois le prix est REVENU sur le niveau d'entrée pendant la vie de la position : une bougie dont l'amplitude contient ce niveau (bas <= entrée <= haut) compte pour une. La bougie d'entrée B4 est EXCLUE (elle s'ouvre au niveau, elle compterait toujours), la bougie de sortie est incluse. 0 = jamais repassée par son prix d'entrée",
+        maxPullupPts:  "MFE — plus forte avancée dans le sens de la position, de l'entrée à la sortie ; bougie de sortie EXCLUE pour une sortie sur stop ('sl' ou 'be') ; plafonnée au TP",
+        maxDrawdownPts:'MAE — plus forte avancée contre la position, bougie de sortie incluse (pessimiste), plafonnée à risk0',
+        maeArmedPts:   "la même MAE, restreinte à la fenêtre où un stop existe (B5 → sortie) ; c'est elle qui doit servir à étudier un stop resserré, la chaleur prise pendant B4 ne pouvant déclencher aucun stop ; null si la position s'est résolue sur B4",
         ambiguite:     'stop et TP touchés dans la même bougie : le stop gagne (pessimiste)',
-        breakEven:     "beTriggerPts > 0 : dès que le profit atteint le seuil, stop déplacé à entrée ± beLevelPts ; status 'be' = sortie sur ce stop ; stop et TP testés avant l'activation, sortie au BE si la bougie d'activation a aussi traversé le niveau ; un stop traversé en gap est rempli au pire de l'open",
+        breakEven:     "trois déclencheurs indépendants aux effets différents. PROFIT (beTriggerPts > 0) et DURÉE (beBarsTrigger > 0) DÉPLACENT LE STOP au niveau BE = entrée ± beLevelPts (borné par le stop structurel) — profit dès que le gain atteint le seuil (évalué dès B4), durée dès que la position tient depuis ce nombre de bougies ; sortie sur ce stop → 'be'. RETOURS (beTouchTrigger > 0) DÉPLACE LE TP au miroir du SL (entrée ± risk0, même distance que le stop côté profit = objectif 1R) dès que le prix est revenu ce nombre de fois sur l'entrée ; le stop structurel reste, sortie sur le TP réduit → 'tp' (vrai gain), sur le stop → 'sl'. tp = objectif courant, tp0 = objectif d'origine, tpReduced = true si le TP a été ramené. beReason = premier déclencheur armé ('profit'|'touch'|'bars'). Un TP atteint sur la bougie de déclenchement l'emporte ; un stop en gap rempli au pire de l'open",
       },
       positions: positions.map(p => ({
         id:             p.id,
@@ -1258,23 +1337,31 @@ export default function TradingChart({
         direction:      p.direction,
         status:         p.status,
         beActivated:    p.beActivated ?? false,
+        beReason:       p.beReason ?? null,
         beDate:         iso(p.beTime),
+        tpReduced:      p.tpReduced ?? false,
         entryTime:      p.entryTime,
         entryDate:      iso(p.entryTime),
-        fillDate:       iso(p.fillTime),
         exitDate:       iso(p.exitTime),
-        barsToFill:     p.barsToFill,
         barsHeld:       p.barsHeld,
+        entryTouches:   p.entryTouches,
         entryPrice:     p.entryPrice,
         exitPrice:      p.exitPrice,
         sl:             p.sl,
+        sl0:            p.sl0,
         tp:             p.tp,
+        tp0:            p.tp0,
+        // Risque propre à la position : la distance au stop structurel.
+        risk0:          +p.risk0.toFixed(6),
+        rr:             p.risk0 > 0 ? +(params.tpPts / p.risk0).toFixed(4) : null,
         profitPoints:   +p.profitPoints.toFixed(6),
-        profitR:        r(p.profitPoints),
+        profitR:        rOf(p.profitPoints, p.risk0),
         maxPullupPts:   p.maxPullupPts   != null ? +p.maxPullupPts.toFixed(6)   : null,
-        maxPullupR:     r(p.maxPullupPts),
+        maxPullupR:     rOf(p.maxPullupPts, p.risk0),
         maxDrawdownPts: p.maxDrawdownPts != null ? +p.maxDrawdownPts.toFixed(6) : null,
-        maxDrawdownR:   r(p.maxDrawdownPts),
+        maxDrawdownR:   rOf(p.maxDrawdownPts, p.risk0),
+        maeArmedPts:    p.maeArmedPts != null ? +p.maeArmedPts.toFixed(6) : null,
+        maeArmedR:      rOf(p.maeArmedPts, p.risk0),
       })),
     };
 
@@ -1321,6 +1408,145 @@ export default function TradingChart({
       showLabel: hbh.showLabel !== false,
     });
   }, [candles, patterns]);
+
+  // ── HM-BM : niveaux entrée/SL (mode « levels ») et/ou positions simulées
+  //    (mode « position »), cumulables comme le rFVG. ─────────────────────────
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const hmbm = patterns.find(p => p.type === 'HMBM' && p.enabled);
+
+    const dropLevels = () => {
+      if (hmbmPrimitiveRef.current) {
+        try { series.detachPrimitive(hmbmPrimitiveRef.current); } catch {}
+        hmbmPrimitiveRef.current = null;
+      }
+    };
+    const dropPositions = () => {
+      if (hmbmPosPrimitiveRef.current) {
+        try { series.detachPrimitive(hmbmPosPrimitiveRef.current); } catch {}
+        hmbmPosPrimitiveRef.current = null;
+      }
+    };
+
+    if (!hmbm || !candles?.length) { dropLevels(); dropPositions(); setHmbmStats(null); hmbmReportRef.current = null; return; }
+
+    const display = hmbm.display ?? 'levels';
+    const detectOpts = {
+      direction: hmbm.direction ?? 'both',
+      maPeriod:  hmbm.maPeriod  ?? 75,
+      atrPeriod: hmbm.atrPeriod ?? 14,
+      mult1:     hmbm.mult1     ?? 1,
+      mult2:     hmbm.mult2     ?? 0.5,
+      extLen:    hmbm.extLen    ?? 5,
+    };
+
+    // Niveaux entrée / SL (primitive dédiée).
+    if (display === 'position') {
+      dropLevels();
+    } else {
+      if (!hmbmPrimitiveRef.current) {
+        hmbmPrimitiveRef.current = createHmbmPrimitive();
+        series.attachPrimitive(hmbmPrimitiveRef.current);
+      }
+      hmbmPrimitiveRef.current.update(calcHMBM(candles, detectOpts), {
+        bullColor: hmbm.bullColor ?? '#26A69A',
+        bearColor: hmbm.bearColor ?? '#EF5350',
+        slColor:   hmbm.slColor   ?? '#B22222',
+      });
+    }
+
+    // Positions simulées (même primitive que les trades du backtest).
+    if (display === 'levels') {
+      dropPositions();
+      setHmbmStats(null);
+      hmbmReportRef.current = null;
+    } else {
+      if (!hmbmPosPrimitiveRef.current) {
+        hmbmPosPrimitiveRef.current = createTradesPrimitive();
+        series.attachPrimitive(hmbmPosPrimitiveRef.current);
+      }
+      const tpPts   = hmbm.tpPts ?? 10;
+      const posOpts = { ...detectOpts, tpPts };
+      const positions = calcHMBMPositions(candles, posOpts);
+      hmbmPosPrimitiveRef.current.update(positions, null);
+
+      let tp = 0, sl = 0, open = 0, sumR = 0, nR = 0;
+      for (const p of positions) {
+        if      (p.status === 'tp') tp++;
+        else if (p.status === 'sl') sl++;
+        else                        open++;
+        if (p.risk0 > 0) { sumR += p.profitPoints / p.risk0; nR++; }
+      }
+      const winrate = (tp + sl) > 0 ? tp / (tp + sl) : null;
+      const expR    = nR > 0 ? sumR / nR : null;
+      setHmbmStats({ total: positions.length, tp, sl, open, winrate, expR, tpPts });
+      hmbmReportRef.current = {
+        params: posOpts,
+        stats:  { total: positions.length, tp, sl, open, winrate, expR },
+        positions,
+      };
+    }
+  }, [candles, patterns]);
+
+  // Rapport JSON des positions HM-BM : recap + excursions par position.
+  const downloadHmbmReport = useCallback(() => {
+    const rep = hmbmReportRef.current;
+    if (!rep) return;
+    const { params, stats, positions } = rep;
+    const iso = t => t != null ? new Date(t * 1000).toISOString() : null;
+    const r   = (pts, risk) => pts != null && risk > 0 ? +(pts / risk).toFixed(4) : null;
+
+    const doc = {
+      pattern:     'HM-BM — positions simulées (entrée marché à l’ouverture de X, SL = extrême M–X, pas de BE)',
+      generatedAt: new Date().toISOString(),
+      params,
+      stats: {
+        ...stats,
+        winrate:      stats.winrate != null ? +stats.winrate.toFixed(4) : null,
+        expectanceR:  stats.expR    != null ? +stats.expR.toFixed(4)    : null,
+      },
+      conventions: {
+        entree:        'entrée au marché à l’ouverture de la bougie X (toujours prise, jamais « missed »)',
+        sl:            'SL = extrême entre M et X ; risk0 = |entrée − SL|, variable selon le motif',
+        tp:            'TP = entrée ± tpPts',
+        suivi:         'la position est suivie à partir de X+1 (le SL n’est posé qu’à la clôture de X)',
+        pessimisme:    'stop testé avant le TP ; stop et TP dans la même bougie → le stop gagne ; stop traversé en gap rempli au pire du niveau et de l’open',
+        unites:        'excursions en points et en R (points / risk0)',
+        maxPullupPts:  'MFE — plus forte avancée favorable ; bougie de sortie exclue pour une sortie sur stop ; plafonné au TP',
+        maxDrawdownPts:'MAE — plus forte avancée contre la position, bougie de sortie incluse ; plafonné à risk0',
+      },
+      positions: positions.map(p => ({
+        id:             p.id,
+        label:          p.label,
+        direction:      p.direction,
+        status:         p.status,
+        entryDate:      iso(p.entryTime),
+        exitDate:       iso(p.exitTime),
+        barsHeld:       p.barsHeld,
+        entryPrice:     p.entryPrice,
+        exitPrice:      p.exitPrice,
+        sl:             p.sl,
+        tp:             p.tp,
+        risk0:          +p.risk0.toFixed(6),
+        profitPoints:   +p.profitPoints.toFixed(6),
+        profitR:        r(p.profitPoints, p.risk0),
+        maxPullupPts:   +p.maxPullupPts.toFixed(6),
+        maxPullupR:     r(p.maxPullupPts, p.risk0),
+        maxDrawdownPts: +p.maxDrawdownPts.toFixed(6),
+        maxDrawdownR:   r(p.maxDrawdownPts, p.risk0),
+      })),
+    };
+
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `hmbm-rapport-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   // ── HBHB / BHBH zones — only rendered in 'grouped' chart mode ──────────────
   useEffect(() => {
@@ -1485,15 +1711,15 @@ export default function TradingChart({
         {/* Moniteur rFVG : stats des positions simulées sur les bougies
             chargées. Alimenté par l'effet rFVG, donc recalculé automatiquement
             à chaque chargement. Winrate sur les positions résolues (TP + SL),
-            comparé au seuil de rentabilité du RR : au-dessus vert, en dessous
-            rouge. */}
+            comparé au seuil de rentabilité RÉALISÉ (perte moyenne rapportée au
+            gain moyen + perte moyenne) : au-dessus vert, en dessous rouge. Tout
+            est en points — le lot est fixe. */}
         {rfvgStats && (() => {
-          const { total, tp, sl, be = 0, missed, open, slPts, tpPts, beOn = false } = rfvgStats;
+          const { total, tp, sl, be = 0, open, expPts, beThresh, profitFactor, beOn = false,
+                  skippedByCooldown = 0, skippedWon = 0 } = rfvgStats;
           const showBe = beOn || be > 0;
-          const rr       = slPts > 0 ? tpPts / slPts : null;
           const resolved = tp + sl;
           const wr       = resolved > 0 ? tp / resolved : null;
-          const beThresh = rr != null ? 1 / (1 + rr) : null;
           const wrColor  = wr == null || beThresh == null ? '#94A3B8' : wr >= beThresh ? '#26A69A' : '#EF5350';
           const row = { display: 'flex', justifyContent: 'space-between', gap: 14, fontSize: 11, lineHeight: '15px' };
           const key = { color: 'rgba(148,163,184,0.85)', fontWeight: 500 };
@@ -1538,18 +1764,122 @@ export default function TradingChart({
                 </span>
               </div>
               <div style={row}>
-                <span style={key}>RR (seuil BE)</span>
+                <span style={key}>Espérance</span>
+                <span style={{ color: expPts == null ? '#94A3B8' : expPts >= 0 ? '#26A69A' : '#EF5350', fontWeight: 700 }}>
+                  {expPts == null ? '—' : `${expPts >= 0 ? '+' : ''}${expPts.toFixed(1)} pts`}
+                </span>
+              </div>
+              <div style={row}>
+                <span style={key}>Facteur de profit</span>
                 <span style={{ fontWeight: 600 }}>
-                  {rr == null ? '—' : rr.toFixed(2)}
+                  {profitFactor == null ? '—' : Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : '∞'}
                   {beThresh != null && (
-                    <span style={{ color: 'rgba(148,163,184,0.7)', fontWeight: 500 }}> ({(beThresh * 100).toFixed(0)} %)</span>
+                    <span style={{ color: 'rgba(148,163,184,0.7)', fontWeight: 500 }}> (seuil {(beThresh * 100).toFixed(0)} %)</span>
                   )}
                 </span>
               </div>
-              {(missed > 0 || open > 0) && (
+              {open > 0 && (
                 <div style={row}>
-                  <span style={key}>Ratées / ouvertes</span>
-                  <span style={{ color: '#94A3B8', fontWeight: 600 }}>{missed} / {open}</span>
+                  <span style={key}>Ouvertes</span>
+                  <span style={{ color: '#94A3B8', fontWeight: 600 }}>{open}</span>
+                </div>
+              )}
+              {skippedByCooldown > 0 && (
+                <div style={row}>
+                  <span style={key}>Sautés (cooldown)</span>
+                  <span style={{ color: '#94A3B8', fontWeight: 600 }}>
+                    {skippedByCooldown}<span style={{ color: 'rgba(148,163,184,0.7)', fontWeight: 500 }}> · {skippedWon} gagnant(s)</span>
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Rapport JSON des positions HM-BM (recap + excursions). Placé à gauche
+            du bouton rFVG quand les deux sont actifs. */}
+        {hmbmStats && (
+          <button
+            onClick={downloadHmbmReport}
+            title="Télécharger le rapport JSON des positions HM-BM (recap, max pullup, max drawdown)"
+            aria-label="Télécharger le rapport des positions HM-BM"
+            style={{
+              position: 'absolute', top: 10, right: rfvgStats ? 214 : 118, zIndex: 11,
+              display: 'flex', alignItems: 'center', gap: 6,
+              height: 30, padding: '0 11px',
+              borderRadius: 999,
+              border: '1px solid rgba(34,211,238,0.4)',
+              background: 'rgba(13,18,32,0.72)',
+              color: '#22D3EE',
+              cursor: 'pointer',
+              fontSize: 11, fontWeight: 700, fontFamily: 'Inter, system-ui, sans-serif',
+              letterSpacing: '0.03em',
+              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M12 15V3" />
+            </svg>
+            HM-BM
+          </button>
+        )}
+
+        {/* Moniteur HM-BM : positions simulées. Empilé sous le moniteur rFVG
+            quand celui-ci est présent. RR variable (SL = extrême M–X), on montre
+            donc l'espérance en R plutôt qu'un RR fixe. */}
+        {hmbmStats && (() => {
+          const { total, tp, sl, open, winrate, expR } = hmbmStats;
+          const wrColor  = winrate == null ? '#94A3B8' : winrate >= 0.5 ? '#26A69A' : '#EF5350';
+          const expColor = expR == null ? '#94A3B8' : expR > 0 ? '#26A69A' : expR < 0 ? '#EF5350' : '#94A3B8';
+          const row = { display: 'flex', justifyContent: 'space-between', gap: 14, fontSize: 11, lineHeight: '15px' };
+          const key = { color: 'rgba(148,163,184,0.85)', fontWeight: 500 };
+          return (
+            <div
+              style={{
+                position: 'absolute', top: rfvgStats ? 122 : 10, left: 14, zIndex: 11,
+                display: 'flex', flexDirection: 'column', gap: 3,
+                minWidth: 172, padding: '9px 12px 10px', borderRadius: 10,
+                border: '1px solid rgba(34,211,238,0.35)',
+                background: 'rgba(13,18,32,0.78)',
+                backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                color: '#E2E8F0', fontFamily: 'Inter, system-ui, sans-serif',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
+                pointerEvents: 'none',
+              }}
+            >
+              <div style={{ ...row, marginBottom: 3 }}>
+                <span style={{ color: '#22D3EE', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em' }}>
+                  HM-BM — POSITIONS
+                </span>
+                <span style={{ color: 'rgba(148,163,184,0.85)', fontWeight: 600 }}>{total}</span>
+              </div>
+              <div style={row}>
+                <span style={key}>TP / SL</span>
+                <span style={{ fontWeight: 700 }}>
+                  <span style={{ color: '#26A69A' }}>{tp}</span>
+                  <span style={{ color: 'rgba(148,163,184,0.6)' }}> / </span>
+                  <span style={{ color: '#EF5350' }}>{sl}</span>
+                </span>
+              </div>
+              <div style={row}>
+                <span style={key}>Winrate</span>
+                <span style={{ color: wrColor, fontWeight: 700 }}>
+                  {winrate == null ? '—' : `${(winrate * 100).toFixed(1)} %`}
+                </span>
+              </div>
+              <div style={row}>
+                <span style={key}>Espérance</span>
+                <span style={{ color: expColor, fontWeight: 700 }}>
+                  {expR == null ? '—' : `${expR.toFixed(3)} R`}
+                </span>
+              </div>
+              {open > 0 && (
+                <div style={row}>
+                  <span style={key}>Ouvertes</span>
+                  <span style={{ color: '#94A3B8', fontWeight: 600 }}>{open}</span>
                 </div>
               )}
             </div>

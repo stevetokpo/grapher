@@ -3,20 +3,30 @@
 // la page recalcule stats, distributions et études BE / trailing à partir des
 // positions qu'il contient.
 //
+// TOUT SE COMPTE EN POINTS. Le stop du rFVG est STRUCTUREL (posé à la clôture de
+// B4 sous/sur l'extrême B3-B4) : le risque varie fortement d'une position à
+// l'autre. Le lot, lui, est FIXE — c'est donc le gain en points qui est
+// proportionnel au résultat réel. Compter en R supposerait qu'on redimensionne
+// la position à chaque trade pour risquer le même montant, ce que la stratégie
+// ne fait pas. Le seuil de rentabilité affiché est celui effectivement réalisé
+// (perte moyenne / (gain moyen + perte moyenne)), pas un 1/(1+RR) qui n'a de
+// sens qu'à risque constant.
+//
 // Les deux études s'appuient sur les excursions du rapport et affichent des
 // BORNES, pas des vérités : l'ordre intra-vie des excursions est inconnu.
 //   • Break-even (borne OPTIMISTE) : une perdante dont le pullup a atteint le
-//     déclencheur est comptée sauvée (0 R au lieu de −1 R) — c'est certain,
+//     déclencheur est comptée sauvée (elle ne coûte plus rien) — c'est certain,
 //     le pullup des perdantes exclut la bougie du stop ; les gagnantes sont
 //     supposées intactes, ce qui, lui, est optimiste.
-//   • SL resserré (borne PESSIMISTE) : une gagnante dont le drawdown a atteint
-//     la nouvelle distance de stop est comptée tuée — pessimiste, la chaleur
-//     est supposée venir avant le TP.
+//   • SL plafonné (borne PESSIMISTE) : une gagnante dont le drawdown a atteint
+//     le plafond est comptée tuée — pessimiste, la chaleur est supposée venir
+//     avant le TP ; une perdante ne coûte plus que le plafond.
 
 import { useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import styles from '../styles/rapports.module.css';
+import { computeStats } from '../lib/rfvg/stats';
 
 const BULL   = '#26A69A';
 const BEAR   = '#EF5350';
@@ -27,11 +37,15 @@ const MUTED  = '#94A3B8';
 const AMBER = '#F59E0B';
 
 const STATUS_META = {
-  tp:     { label: 'TP',      color: BULL },
-  sl:     { label: 'SL',      color: BEAR },
-  be:     { label: 'BE',      color: AMBER },
-  missed: { label: 'Ratée',   color: MUTED },
-  open:   { label: 'Ouverte', color: BLUE },
+  tp:      { label: 'TP',      color: BULL },
+  sl:      { label: 'SL',      color: BEAR },
+  be:      { label: 'BE',      color: AMBER },
+  // Sortie sur plafond de durée (maxBars) : elle n'existe que dans les rapports
+  // produits par l'optimiseur, pas dans ceux du graphe. Sans cette entrée elle
+  // s'afficherait « Ouverte », c'est-à-dire l'inverse de ce qu'elle est.
+  timeout: { label: 'Durée',   color: ORANGE },
+  missed:  { label: 'Ratée',   color: MUTED },
+  open:    { label: 'Ouverte', color: BLUE },
 };
 
 const fmtDate = iso => {
@@ -40,9 +54,17 @@ const fmtDate = iso => {
   return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })
     + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 };
-const fmtR   = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)} R`;
+// Le P&L se compte en POINTS : le lot est fixe, c'est lui qui est
+// proportionnel au gain réel. Le R supposerait une position redimensionnée
+// à chaque trade pour risquer le même montant.
+const fmtP   = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(1)} pts`;
 const fmtPct = v => v == null ? '—' : `${(v * 100).toFixed(1)} %`;
 const fmtNum = (v, d = 2) => v == null ? '—' : v.toFixed(d);
+// Facteur de profit : ∞ quand il n'y a aucune perte — le dire plutôt que le taire.
+const fmtPF  = v => v == null ? '—' : (Number.isFinite(v) ? v.toFixed(2) : '∞');
+// Max par réduction : Math.max(...tableau) fait sauter la pile d'appel dès
+// quelques dizaines de milliers d'éléments, ce qu'un rapport 1m atteint.
+const maxOf  = (floor, a) => a.reduce((m, v) => v > m ? v : m, floor);
 
 // ── Tuile de stat ────────────────────────────────────────────────────────────
 function Tile({ label, value, sub, color }) {
@@ -55,7 +77,7 @@ function Tile({ label, value, sub, color }) {
   );
 }
 
-// ── Courbe de R cumulé (positions résolues, dans l'ordre d'entrée) ──────────
+// ── Courbe de points cumulés (positions résolues, dans l'ordre d'entrée) ────
 function EquityChart({ points }) {
   const [hover, setHover] = useState(null);
   const W = 1080, H = 220, PL = 46, PR = 12, PT = 12, PB = 26;
@@ -90,7 +112,7 @@ function EquityChart({ points }) {
             <line x1={PL} x2={W - PR} y1={y(t)} y2={y(t)}
               stroke={t === 0 ? 'rgba(148,163,184,0.35)' : 'rgba(26,37,64,0.8)'}
               strokeWidth="1" strokeDasharray={t === 0 ? '' : '3,4'} />
-            <text x={PL - 7} y={y(t) + 3} textAnchor="end" className={styles.axisLabel}>{t} R</text>
+            <text x={PL - 7} y={y(t) + 3} textAnchor="end" className={styles.axisLabel}>{t}</text>
           </g>
         ))}
         <path d={`${path}L${x(points.length - 1)},${y(Math.max(0, yMin))}L${x(0)},${y(Math.max(0, yMin))}Z`}
@@ -111,7 +133,7 @@ function EquityChart({ points }) {
       {hover && (
         <div className={styles.chartTooltip} style={{ left: hover.left, top: hover.top }}>
           #{points[hover.i].id} · {fmtDate(points[hover.i].date)}<br />
-          trade {fmtR(points[hover.i].r)} · cumul <b>{fmtR(points[hover.i].cum)}</b>
+          trade {fmtP(points[hover.i].r)} · cumul <b>{fmtP(points[hover.i].cum)}</b>
         </div>
       )}
     </div>
@@ -119,7 +141,7 @@ function EquityChart({ points }) {
 }
 
 // ── Histogramme d'excursions (une seule série, une seule teinte) ────────────
-function Histogram({ values, color, maxX, unit = 'R' }) {
+function Histogram({ values, color, maxX, unit = 'pts' }) {
   const [hover, setHover] = useState(null);
   const W = 520, H = 190, PL = 34, PR = 8, PT = 14, PB = 28;
 
@@ -202,70 +224,34 @@ export default function RapportsPage() {
     });
   };
 
-  // Tout est redérivé des positions — le rapport reste la seule source.
+  // Tout est redérivé des positions — le rapport reste la seule source. Le calcul
+  // lui-même vit dans lib/rfvg/stats.js, partagé avec la page /rfvg et l'API :
+  // deux implémentations finiraient par donner deux chiffres pour le même
+  // rapport, et il n'y aurait aucun moyen de savoir lequel croire.
   const d = useMemo(() => {
     if (!report) return null;
     const pos    = report.positions;
     const params = report.params ?? {};
-    const slPts  = params.slPts ?? 0;
     const tpPts  = params.tpPts ?? 0;
-    const rr     = slPts > 0 ? tpPts / slPts : null;
 
-    const byStatus = { tp: [], sl: [], be: [], missed: [], open: [] };
-    for (const p of pos) (byStatus[p.status] ?? byStatus.open).push(p);
-    const tp = byStatus.tp.length, sl = byStatus.sl.length, beN = byStatus.be.length;
-    const beOn = (params.beTriggerPts ?? 0) > 0 || beN > 0;
+    const s = computeStats(pos, { tpPts, riskFallback: params.slPts ?? 0 });
+    const beOn = (params.beTriggerPts ?? 0) > 0 || s.be > 0;
+    const byId = new Map(pos.map(p => [p.id, p]));
 
-    // Winrate et études : population TP/SL. Espérance et équité : toutes les
-    // résolues, BE compris (leur profitR vient du rapport, niveau BE inclus).
-    const resolved = tp + sl;
-    const winrate  = resolved ? tp / resolved : null;
-    const be       = rr != null ? 1 / (1 + rr) : null;
-
-    const resolvedPos = [...byStatus.tp, ...byStatus.sl, ...byStatus.be]
-      .sort((a, b) => a.entryTime - b.entryTime);
-    const expR = resolvedPos.length
-      ? resolvedPos.reduce((s, p) => s + (p.profitR ?? 0), 0) / resolvedPos.length
-      : null;
-    const expWL = resolved && rr != null ? (tp * rr - sl) / resolved : null;
-
-    // Courbe de R cumulé sur les résolues, ordre chronologique d'entrée
-    let cum = 0;
-    const equity = resolvedPos
-      .map(p => ({ id: p.id, date: p.entryDate, r: p.profitR ?? 0, cum: (cum += p.profitR ?? 0) }));
-
-    const mfeLosers  = byStatus.sl.map(p => p.maxPullupR).filter(v => v != null);
-    const maeWinners = byStatus.tp.map(p => p.maxDrawdownR).filter(v => v != null);
-
-    // Étude break-even (borne optimiste) — sur la population TP/SL uniquement
-    const beStudy = [];
-    if (resolved && rr != null) {
-      for (let i = 1; i <= 9; i++) {
-        const t = +(rr * i / 10).toFixed(2);
-        const saved = mfeLosers.filter(v => v >= t).length;
-        beStudy.push({ t, saved, pct: sl ? saved / sl : 0, exp: (tp * rr - (sl - saved)) / resolved });
-      }
-    }
-
-    // Étude SL resserré (borne pessimiste) — espérance en R du SL D'ORIGINE.
-    // Les perdantes d'origine sont stoppées quelle que soit la distance (leur
-    // MAE vaut 1 R) : elles coûtent d au lieu de 1. À d = 1 on retombe
-    // exactement sur l'espérance de base.
-    const slStudy = [];
-    if (resolved && rr != null) {
-      for (let i = 1; i <= 10; i++) {
-        const dd = +(i / 10).toFixed(1);
-        const wk = maeWinners.filter(v => v >= dd).length; // gagnantes tuées
-        slStudy.push({
-          d: dd, killed: wk,
-          exp: ((tp - wk) * rr - (wk + sl) * dd) / resolved,
-        });
-      }
-    }
-    const bestBe = beStudy.reduce((m, r) => r.exp > (m?.exp ?? -Infinity) ? r : m, null);
-    const bestSl = slStudy.reduce((m, r) => r.exp > (m?.exp ?? -Infinity) ? r : m, null);
-
-    return { pos, params, rr, byStatus, tp, sl, beN, beOn, resolved, resolvedAll: resolvedPos.length, winrate, be, expR, expWL, equity, mfeLosers, maeWinners, beStudy, slStudy, bestBe, bestSl };
+    return {
+      ...s, pos, params, tpPts, beOn,
+      // La page nommait ces champs autrement avant l'extraction ; on garde ses
+      // noms côté rendu plutôt que de réécrire tout le JSX.
+      beN: s.be, be: s.beThresh,
+      durMed: s.barsHeldMedian, durMean: s.barsHeldMean, durMax: s.barsHeldMax,
+      touchMean: s.entryTouchesMean, touchMax: s.entryTouchesMax,
+      // La courbe affiche une date lisible : le rapport porte l'ISO (entryDate),
+      // le simulateur seulement l'epoch — on retombe sur l'un ou l'autre.
+      equity: s.equity.map(pt => ({
+        id: pt.id, r: pt.pts, cum: pt.cum,
+        date: byId.get(pt.id)?.entryDate ?? new Date(pt.time * 1000).toISOString(),
+      })),
+    };
   }, [report]);
 
   const rows = useMemo(() => {
@@ -284,9 +270,9 @@ export default function RapportsPage() {
 
   const COLS = [
     ['id', '#'], ['direction', 'Dir'], ['status', 'Statut'], ['entryTime', 'Entrée'],
-    ['barsToFill', 'B. avant prise'], ['barsHeld', 'B. tenues'],
+    ['risk0', 'Risque (pts)'], ['rr', 'RR'], ['barsHeld', 'Durée (bougies)'], ['entryTouches', "Retours sur l'entrée"],
     ['entryPrice', 'Prix entrée'], ['exitPrice', 'Prix sortie'],
-    ['profitR', 'Profit R'], ['maxPullupR', 'Pullup max R'], ['maxDrawdownR', 'Drawdown max R'],
+    ['profitPoints', 'Profit (pts)'], ['maxPullupPts', 'Pullup max (pts)'], ['maxDrawdownPts', 'Drawdown max (pts)'],
   ];
 
   return (
@@ -349,10 +335,21 @@ export default function RapportsPage() {
             ))}
           </div>
 
+          {/* Cooldown : signaux sautés (hors rapport, juste comptés au calcul) */}
+          {(report.stats?.skippedByCooldown ?? 0) > 0 && (
+            <p className={styles.cardSub} style={{ marginTop: -4 }}>
+              Cooldown actif : <b>{report.stats.skippedByCooldown}</b> signal(aux) sauté(s) après un TP,
+              dont <b>{report.stats.skippedWon}</b> auraient gagné. Ces trades ne sont pas dans le rapport
+              ci-dessous — seulement les <b>{d.pos.length}</b> réellement pris.
+            </p>
+          )}
+
           {/* Tuiles */}
           <div className={styles.tiles}>
             <Tile label="Positions" value={d.pos.length}
-              sub={`${d.byStatus.missed.length} ratée(s) · ${d.byStatus.open.length} ouverte(s)`} />
+              sub={d.byStatus.missed.length
+                ? `${d.byStatus.missed.length} ratée(s) · ${d.byStatus.open.length} ouverte(s)`
+                : `${d.byStatus.open.length} ouverte(s)`} />
             <Tile label={d.beOn ? 'TP / BE / SL' : 'TP / SL'} color={undefined}
               value={
                 <>
@@ -365,17 +362,47 @@ export default function RapportsPage() {
               sub={`${d.resolvedAll} résolues${d.beOn ? ` dont ${d.beN} BE` : ''}`} />
             <Tile label="Winrate" value={fmtPct(d.winrate)}
               color={d.winrate != null && d.be != null ? (d.winrate >= d.be ? BULL : BEAR) : undefined}
-              sub={d.be != null ? `TP/(TP+SL) · seuil BE du RR : ${fmtPct(d.be)}` : 'TP/(TP+SL)'} />
-            <Tile label="RR" value={fmtNum(d.rr)} sub={`TP ${d.params.tpPts} / SL ${d.params.slPts} pts`} />
-            <Tile label="Espérance" value={fmtR(d.expR)}
-              color={d.expR != null ? (d.expR >= 0 ? BULL : BEAR) : undefined}
+              sub={d.be != null ? `TP/(TP+SL) · seuil de rentabilité réalisé : ${fmtPct(d.be)}` : 'TP/(TP+SL)'} />
+            <Tile label="Risque médian" value={d.riskMed != null ? `${fmtNum(d.riskMed, 1)} pts` : '—'}
+              sub={d.risks.length
+                ? `TP ${d.tpPts} pts · étendue ${fmtNum(d.risks[0], 1)} → ${fmtNum(d.risks[d.risks.length - 1], 1)} pts`
+                : `TP ${d.tpPts} pts · SL structurel`} />
+            <Tile label="Espérance" value={fmtP(d.expPts)}
+              color={d.expPts != null ? (d.expPts >= 0 ? BULL : BEAR) : undefined}
               sub={`par position résolue${d.beOn ? ', BE incl.' : ''}, spread 0`} />
           </div>
 
-          {/* Courbe de R cumulé */}
+          {/* Performance — tout en points : le lot est fixe */}
+          <div className={styles.tiles}>
+            <Tile label="Facteur de profit" value={fmtPF(d.profitFactor)}
+              color={d.profitFactor != null ? (d.profitFactor >= 1 ? BULL : BEAR) : undefined}
+              sub="gains bruts / pertes brutes, en points" />
+            <Tile label="Points nets" value={fmtP(d.netPts)}
+              color={d.netPts >= 0 ? BULL : BEAR}
+              sub={`${d.nWin} gagnante(s) · ${d.nLoss} perdante(s)`} />
+            <Tile label="Gain moyen" value={fmtP(d.avgWin)} color={BULL}
+              sub={d.avgLoss != null ? `perte moyenne ${fmtP(-d.avgLoss)}` : 'aucune perte'} />
+            <Tile label="Drawdown max" value={fmtP(-d.maxDD)} color={BEAR}
+              sub="creux maximal de la courbe cumulée" />
+            <Tile label="Pertes d'affilée" value={d.maxLossStreak}
+              sub="plus longue série, ordre d'entrée" />
+            <Tile label="Durée médiane" value={d.durMed != null ? `${fmtNum(d.durMed, 1)} b.` : '—'}
+              sub={d.durations.length
+                ? `moyenne ${fmtNum(d.durMean, 1)} · max ${d.durMax} bougies`
+                : 'aucune position résolue'} />
+            <Tile label="Résolues dans B4" value={`${d.onEntryBar} / ${d.resolvedAll}`}
+              color={d.onEntryBar > 0 ? AMBER : undefined}
+              sub="ouvertes et fermées dans la bougie d'entrée, donc sans stop actif" />
+            <Tile label="Retours sur l'entrée" value={d.touchMean != null ? fmtNum(d.touchMean, 2) : '—'}
+              sub={d.touches.length
+                ? `en moyenne · max ${d.touchMax} · ${d.neverReturned} sans retour`
+                : 'aucune position résolue'} />
+          </div>
+
+          {/* Courbe de points cumulés */}
           <section className={styles.card}>
-            <h2 className={styles.cardTitle}>R cumulé</h2>
-            <p className={styles.cardSub}>Somme des profits en R des positions résolues, dans l'ordre chronologique d'entrée.</p>
+            <h2 className={styles.cardTitle}>Points cumulés</h2>
+            <p className={styles.cardSub}>Somme des profits en points des positions résolues, dans l'ordre chronologique d'entrée. Lot fixe : chaque point pèse pareil, quel que soit le risque de la position.</p>
             <EquityChart points={d.equity} />
           </section>
 
@@ -387,8 +414,9 @@ export default function RapportsPage() {
                 Jusqu'où chaque perdante est allée dans le bon sens avant d'être stoppée —
                 la matière première du break-even : une barre à droite est une perdante
                 qu'un BE aurait pu neutraliser.
+                {' '}Moyenne : <b style={{ color: BEAR }}>{fmtNum(d.avgMfeLosers, 1)} pts</b>.
               </p>
-              <Histogram values={d.mfeLosers} color={BEAR} maxX={Math.max(d.rr ?? 1, 0.1)} />
+              <Histogram values={d.mfeLosers} color={BEAR} maxX={maxOf(0.1, d.mfeLosers)} unit="pts" />
             </section>
             <section className={styles.card}>
               <h2 className={styles.cardTitle} style={{ color: BULL }}>Drawdown max des gagnantes (TP)</h2>
@@ -396,8 +424,9 @@ export default function RapportsPage() {
                 La chaleur que chaque gagnante a prise avant d'atteindre le TP —
                 la limite du break-even : une barre à droite est une gagnante
                 qu'un BE ou un stop resserré aurait tuée.
+                {' '}Moyenne : <b style={{ color: BULL }}>{fmtNum(d.avgMaeWinners, 1)} pts</b>.
               </p>
-              <Histogram values={d.maeWinners} color={BULL} maxX={1} />
+              <Histogram values={d.maeWinners} color={BULL} maxX={maxOf(0.1, d.maeWinners)} unit="pts" />
             </section>
           </div>
 
@@ -406,47 +435,58 @@ export default function RapportsPage() {
             <section className={styles.card}>
               <h2 className={styles.cardTitle}>Étude break-even <span style={{ color: 'var(--text-dim)', fontWeight: 500 }}>— borne optimiste</span></h2>
               <p className={styles.cardSub}>
-                SL remonté à l'entrée dès que le profit atteint le déclencheur. Les perdantes
-                sauvées sont certaines (leur pullup exclut la bougie du stop) ; les gagnantes
-                sont supposées intactes, ce qui est optimiste.
+                SL remonté à l'entrée dès que le profit atteint le déclencheur, exprimé en
+                points — reportable tel quel dans le panneau. Les perdantes sauvées sont
+                certaines (leur pullup exclut la bougie du stop) ; les gagnantes sont supposées
+                intactes, ce qui est optimiste. Compté en points, sauver une grosse perdante
+                rapporte plus que sauver une petite.
                 {d.beOn && (
-                  <> <b style={{ color: AMBER }}>Ce rapport a déjà un BE appliqué</b> (seuil{' '}
-                  {d.params.beTriggerPts} pts, niveau {d.params.beLevelPts} pts) : les études ne
-                  portent que sur les positions TP/SL restantes, les sorties BE en sont exclues.</>
+                  <> <b style={{ color: AMBER }}>Ce rapport a déjà un BE appliqué</b>
+                  {' '}({[
+                    (d.params.beTriggerPts ?? 0) > 0 && `profit ${d.params.beTriggerPts} pts`,
+                    (d.params.beTouchTrigger ?? 0) > 0 && `${d.params.beTouchTrigger} retour(s)`,
+                    (d.params.beBarsTrigger ?? 0) > 0 && `${d.params.beBarsTrigger} bougies`,
+                  ].filter(Boolean).join(', ') || 'seuil inconnu'}, niveau {d.params.beLevelPts ?? 0} pts) :
+                  les études ne portent que sur les positions TP/SL restantes, les sorties BE en
+                  sont exclues.</>
                 )}
               </p>
               <table className={styles.studyTable}>
                 <thead><tr><th>Déclencheur</th><th>Perdantes sauvées</th><th>%</th><th>Espérance</th></tr></thead>
                 <tbody>
                   <tr className={styles.baseRow}>
-                    <td>sans BE</td><td>—</td><td>—</td><td>{fmtR(d.expWL)}</td>
+                    <td>sans BE</td><td>—</td><td>—</td><td>{fmtP(d.expWL)}</td>
                   </tr>
                   {d.beStudy.map(r => (
                     <tr key={r.t} className={r === d.bestBe ? styles.bestRow : ''}>
-                      <td>{fmtNum(r.t)} R</td>
+                      <td>{fmtNum(r.t, 1)} pts</td>
                       <td>{r.saved} / {d.sl}</td>
                       <td>{fmtPct(r.pct)}</td>
-                      <td>{fmtR(r.exp)}</td>
+                      <td>{fmtP(r.exp)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </section>
             <section className={styles.card}>
-              <h2 className={styles.cardTitle}>Étude SL resserré <span style={{ color: 'var(--text-dim)', fontWeight: 500 }}>— borne pessimiste</span></h2>
+              <h2 className={styles.cardTitle}>Étude SL plafonné <span style={{ color: 'var(--text-dim)', fontWeight: 500 }}>— borne pessimiste</span></h2>
               <p className={styles.cardSub}>
-                Et si le stop initial était à une fraction du SL actuel ? Une gagnante dont le
-                drawdown atteint la nouvelle distance est comptée tuée (chaleur supposée venir
-                avant le TP). Espérance en R du SL d'origine.
+                Et si le stop structurel était BORNÉ à une distance maximale ? Une gagnante dont
+                le drawdown atteint le plafond est comptée tuée (chaleur supposée venir avant le
+                TP) ; une perdante ne coûte plus que le plafond. La chaleur lue est celle de la
+                fenêtre où le stop existe (B5 → sortie) : pendant B4 la position n'est pas
+                protégée, aucun plafond ne s'y déclencherait. Les paliers suivent les déciles du
+                risque observé — au dernier, plus rien n'est plafonné.
               </p>
               <table className={styles.studyTable}>
-                <thead><tr><th>Distance</th><th>Gagnantes tuées</th><th>Espérance</th></tr></thead>
+                <thead><tr><th>Plafond</th><th>Positions rognées</th><th>Gagnantes tuées</th><th>Espérance</th></tr></thead>
                 <tbody>
-                  {d.slStudy.map(r => (
-                    <tr key={r.d} className={r === d.bestSl ? styles.bestRow : (r.d === 1 ? styles.baseRow : '')}>
-                      <td>{fmtNum(r.d, 1)} × SL{r.d === 1 ? ' (actuel)' : ''}</td>
+                  {d.slStudy.map((r, i) => (
+                    <tr key={r.d} className={r === d.bestSl ? styles.bestRow : (i === d.slStudy.length - 1 ? styles.baseRow : '')}>
+                      <td>{fmtNum(r.d, 1)} pts{i === d.slStudy.length - 1 ? ' (aucun)' : ''}</td>
+                      <td>{r.capped} / {d.resolved}</td>
                       <td>{r.killed} / {d.tp}</td>
-                      <td>{fmtR(r.exp)}</td>
+                      <td>{fmtP(r.exp)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -455,8 +495,13 @@ export default function RapportsPage() {
           </div>
 
           <p className={styles.caveat}>
-            Mesures en échantillon, à spread nul, avec remplissage limite optimiste et SL
-            prioritaire dans la bougie. Les deux études sont des bornes construites sur des
+            Mesures en échantillon, à spread nul, avec SL prioritaire dans la bougie. Tout est
+            compté en POINTS : le lot étant fixe, c'est lui qui est proportionnel au gain réel —
+            compter en R supposerait qu'on redimensionne la position à chaque trade pour risquer
+            le même montant. Le risque en points varie fortement d'une position à l'autre (stop
+            structurel) : la tuile « Risque médian » en donne l'étendue, et le seuil de
+            rentabilité affiché est celui effectivement réalisé, tiré des gains et pertes moyens.
+            Les deux études sont des bornes construites sur des
             excursions globales par position — l'ordre intra-vie des excursions est inconnu à
             la granularité bougie. Une piste qui ressort ici doit être rejouée dans le module
             de backtest avec friction avant d'y croire.
@@ -470,7 +515,7 @@ export default function RapportsPage() {
                 ['tp', `TP (${d.tp})`],
                 ...(d.beOn ? [['be', `BE (${d.beN})`]] : []),
                 ['sl', `SL (${d.sl})`],
-                ['missed', `Ratées (${d.byStatus.missed.length})`],
+                ...(d.byStatus.missed.length ? [['missed', `Ratées (${d.byStatus.missed.length})`]] : []),
                 ['open', `Ouvertes (${d.byStatus.open.length})`]].map(([v, l]) => (
                 <button key={v}
                   className={`${styles.filterChip}${statusFilter === v ? ` ${styles.filterChipOn}` : ''}`}
@@ -508,15 +553,17 @@ export default function RapportsPage() {
                           </span>
                         </td>
                         <td>{fmtDate(p.entryDate)}</td>
-                        <td>{p.barsToFill ?? '—'}</td>
+                        <td>{p.risk0 != null ? fmtNum(p.risk0) : '—'}</td>
+                        <td>{p.rr != null ? fmtNum(p.rr) : '—'}</td>
                         <td>{p.barsHeld ?? '—'}</td>
+                        <td>{p.entryTouches ?? '—'}</td>
                         <td>{fmtNum(p.entryPrice, 2)}</td>
                         <td>{fmtNum(p.exitPrice, 2)}</td>
-                        <td style={{ color: p.status === 'missed' ? 'var(--text-dim)' : p.status === 'be' ? AMBER : (p.profitR ?? 0) >= 0 ? BULL : BEAR }}>
-                          {p.status === 'missed' ? '—' : fmtR(p.profitR)}
+                        <td style={{ color: p.status === 'missed' ? 'var(--text-dim)' : p.status === 'be' ? AMBER : (p.profitPoints ?? 0) >= 0 ? BULL : BEAR }}>
+                          {p.status === 'missed' ? '—' : fmtP(p.profitPoints)}
                         </td>
-                        <td>{p.maxPullupR   != null ? fmtNum(p.maxPullupR)   : '—'}</td>
-                        <td>{p.maxDrawdownR != null ? fmtNum(p.maxDrawdownR) : '—'}</td>
+                        <td>{p.maxPullupPts   != null ? fmtNum(p.maxPullupPts, 1)   : '—'}</td>
+                        <td>{p.maxDrawdownPts != null ? fmtNum(p.maxDrawdownPts, 1) : '—'}</td>
                       </tr>
                     );
                   })}
