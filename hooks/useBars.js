@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-const BARS_PER_PAGE = 500;
-const POLL_MS       = 5000; // rafraîchissement live (EA MT5 → serveur → ici)
+const POLL_MS = 5000; // rafraîchissement live (EA MT5 → serveur → ici)
 
-export function useBars(symbolId, tfId) {
+export function useBars(symbolId, tfId, initialBars = 500, barsPerPage = 500) {
   const [allBars,     setAllBars]     = useState([]);
   const [loading,     setLoading]     = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -15,6 +14,7 @@ export function useBars(symbolId, tfId) {
   const symbolIdRef = useRef(null);
   const tfIdRef     = useRef('1h');
   const fetchingRef = useRef(false);
+  const barsPerPageRef = useRef(barsPerPage);
   // Bumped on every symbol/tf change — in-flight loadMore responses from a
   // previous generation are discarded (they would prepend bars of another tf).
   const genRef      = useRef(0);
@@ -23,6 +23,7 @@ export function useBars(symbolId, tfId) {
   useEffect(() => { hasMoreRef.current  = hasMore;  }, [hasMore]);
   useEffect(() => { symbolIdRef.current = symbolId; }, [symbolId]);
   useEffect(() => { tfIdRef.current     = tfId;     }, [tfId]);
+  useEffect(() => { barsPerPageRef.current = barsPerPage; }, [barsPerPage]);
 
   // Reset + initial fetch when symbol or timeframe changes
   useEffect(() => {
@@ -38,13 +39,13 @@ export function useBars(symbolId, tfId) {
     setLoadingMore(false);
 
     const ctrl = new AbortController();
-    fetch(`/api/bars?symbolId=${symbolId}&tf=${tfId}&limit=${BARS_PER_PAGE}`, { signal: ctrl.signal })
+    fetch(`/api/bars?symbolId=${symbolId}&tf=${tfId}&limit=${initialBars}`, { signal: ctrl.signal })
       .then(r => r.json())
       .then(data => {
         const bars = Array.isArray(data) ? data : [];
         setAllBars(bars);
         allBarsRef.current = bars;
-        if (bars.length < BARS_PER_PAGE) {
+        if (bars.length < initialBars) {
           setHasMore(false);
           hasMoreRef.current = false;
         }
@@ -54,7 +55,7 @@ export function useBars(symbolId, tfId) {
 
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbolId, tfId]);
+  }, [symbolId, tfId, initialBars]);
 
   // ── Live : intègre les nouvelles bougies sans recharger la page ──────────
   // Toutes les POLL_MS, redemande les bougies depuis le DERNIER bucket connu
@@ -75,7 +76,7 @@ export function useBars(symbolId, tfId) {
       const from = bars[bars.length - 1].time;
       try {
         const data = await fetch(
-          `/api/bars?symbolId=${symbolId}&tf=${tfId}&from=${from}&limit=${BARS_PER_PAGE}`,
+          `/api/bars?symbolId=${symbolId}&tf=${tfId}&from=${from}&limit=${barsPerPageRef.current}`,
         ).then(r => r.json());
         if (stopped || gen !== genRef.current) return;
 
@@ -118,7 +119,7 @@ export function useBars(symbolId, tfId) {
     setLoadingMore(true);
 
     const cursor = bars[0].time;
-    const url = `/api/bars?symbolId=${symbolIdRef.current}&tf=${tfIdRef.current}&limit=${BARS_PER_PAGE}&to=${cursor}`;
+    const url = `/api/bars?symbolId=${symbolIdRef.current}&tf=${tfIdRef.current}&limit=${barsPerPageRef.current}&to=${cursor}`;
 
     try {
       const data  = await fetch(url).then(r => r.json());
@@ -130,7 +131,7 @@ export function useBars(symbolId, tfId) {
         hasMoreRef.current = false;
       } else {
         setAllBars(prev => [...older, ...prev]);
-        if (older.length < BARS_PER_PAGE) {
+        if (older.length < barsPerPageRef.current) {
           setHasMore(false);
           hasMoreRef.current = false;
         }

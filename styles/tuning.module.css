@@ -1,6 +1,7 @@
-/* Page /rfvg — réglages rFVG par symbole (détection figée, sorties calibrées).
-   Reprend les tokens de globals.css. Page scrollable, contrairement au shell
-   de l'app qui est overflow hidden. */
+/* Pages de réglage d'un motif par symbole — /rfvg (détection figée, sorties
+   calibrées) et /ko (détection balayable). Les deux pages ont la même structure,
+   elles partagent donc la même feuille. Reprend les tokens de globals.css. Page
+   scrollable, contrairement au shell de l'app qui est overflow hidden. */
 
 .page {
   min-height: 100vh;

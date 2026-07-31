@@ -69,8 +69,10 @@ export default async function handler(req, res) {
     const m1Ctx = { bars: m1, ranges };
 
     const measure = zs => {
-      const all = simulatePositions(candles, zs, { ...ex.params, fills, m1: m1Ctx });
-      return computeStats(windowPositions(all, from, to), { tpPts: ex.params.tpPts, spreadPoints: spread });
+      const all = simulatePositions(candles, zs, { ...ex.params, spreadPts: spread, fills, m1: m1Ctx });
+      return computeStats(windowPositions(all, from, to), {
+        tpPts: ex.params.tpUnit === 'atr' ? undefined : ex.params.tpPts, spreadPoints: spread,
+      });
     };
 
     const real = measure(zones);

@@ -86,9 +86,11 @@ export default async function handler(req, res) {
       // borne franchie doit se voir, pas se corriger en douce.
       const { params: clean } = sanitize(EXIT_SCHEMA, params);
 
-      const all = simulatePositions(candles, zones, { ...clean, fills, m1: m1Ctx });
+      const all = simulatePositions(candles, zones, { ...clean, spreadPts: spread, fills, m1: m1Ctx });
       const inWin = windowPositions(all, from, to);
-      const stats = computeStats(inWin, { tpPts: clean.tpPts, spreadPoints: spread });
+      const stats = computeStats(inWin, {
+        tpPts: clean.tpUnit === 'atr' ? undefined : clean.tpPts, spreadPoints: spread,
+      });
 
       const row = {
         params: combo,
@@ -97,7 +99,9 @@ export default async function handler(req, res) {
       };
 
       for (const [name, f, t] of evalWindows) {
-        const s = computeStats(windowPositions(all, f, t), { tpPts: clean.tpPts, spreadPoints: spread });
+        const s = computeStats(windowPositions(all, f, t), {
+          tpPts: clean.tpUnit === 'atr' ? undefined : clean.tpPts, spreadPoints: spread,
+        });
         row[name] = summarize(s);
       }
       results.push(row);

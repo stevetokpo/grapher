@@ -49,15 +49,17 @@ export default async function handler(req, res) {
     // même stratégie. Le jour où les deux divergent, on veut le savoir par un
     // test, pas par un écart de résultats inexpliqué six semaines plus tard.
     const all = b.engine === 'legacy'
-      ? calcRFVGPositions(candles, { ...det.params, ...ex.params })
-      : simulatePositions(candles, zones, { ...ex.params, fills, m1: { bars: m1, ranges } });
+      ? calcRFVGPositions(candles, { ...det.params, ...ex.params, spreadPts: spread })
+      : simulatePositions(candles, zones, { ...ex.params, spreadPts: spread, fills, m1: { bars: m1, ranges } });
 
     let positions = windowPositions(all, from, to);
     const inWindow = positions.length;
     const firstN = Number(b.firstN) || 0;
     if (firstN > 0) positions = positions.slice(0, firstN);
 
-    const stats = computeStats(positions, { tpPts: ex.params.tpPts, spreadPoints: spread });
+    const stats = computeStats(positions, {
+      tpPts: ex.params.tpUnit === 'atr' ? undefined : ex.params.tpPts, spreadPoints: spread,
+    });
 
     const limit = b.limit === 0 ? 0 : (Number(b.limit) || 2000);
 

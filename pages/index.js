@@ -54,7 +54,11 @@ export default function Home() {
     addDrawing, updateDrawing, removeDrawing, clearAll,
   } = useDrawings();
 
-  const { allBars, loading, loadingMore, hasMore, onLoadMore } = useBars(symbolId, tfId);
+  const { allBars, loading, loadingMore, hasMore, onLoadMore } = useBars(
+    symbolId, tfId,
+    settings?.initialBars   ?? 500,
+    settings?.barsPerScroll ?? 500,
+  );
 
   const hasTicks       = (currentSym?.tick_count ?? 0) > 0;
   const inFootprint    = chartMode === 'footprint' && hasTicks;
@@ -138,6 +142,7 @@ export default function Home() {
         onRsi={() => router.push('/rsi')}
         onBacktest={() => router.push('/backtest')}
         onRfvg={() => router.push('/rfvg')}
+        onKo={() => router.push('/ko')}
         onChat={() => setShowChat(true)}
         onAlerts={() => setShowAlerts(true)}
       />
@@ -191,9 +196,8 @@ export default function Home() {
                 htfBars={htfBars}
                 patterns={effectivePatterns}
                 chartMode={chartMode}
-                bullColor={settings?.bullColor ?? '#26A69A'}
-                bearColor={settings?.bearColor ?? '#EF5350'}
-                showVolume={settings?.showVolume ?? true}
+                settings={settings}
+                watermarkText={currentSym ? `${currentSym.name} · ${tfId.toUpperCase()}` : ''}
                 cvdData={chartMode === 'candle' ? cvdData : null}
                 drawings={drawings}
                 activeTool={activeTool}

@@ -25,13 +25,25 @@ celui *réalisé* — `perte moyenne / (gain moyen + perte moyenne)` — et non 
 
 ## Architecture
 
+Le simulateur, les statistiques, le cache et le schéma des sorties ne sont plus
+propres au rFVG : ils sont **partagés** avec les autres motifs à stop structurel
+(le KO — cf. `docs/ko-optimisation.md`). `lib/rfvg/*` ne garde que la détection et
+les noms d'origine ; ce qu'il calcule n'a pas bougé d'un pouce, et
+`scripts/rfvg-parity.mjs` le vérifie toujours cas par cas.
+
 ```
-lib/rfvg/
-  simulate.js   simulateur : zones injectées, fills 'bar' ou 'm1', plafond de durée
+lib/signals/    NOYAU COMMUN
+  engine.js     simulateur : signaux injectés, fills 'bar' ou 'm1', plafond de durée
   stats.js      statistiques et études BE / SL plafonné — SOURCE UNIQUE
                 (utilisée aussi par pages/rapports.js et par la page /rfvg)
   data.js       chargement M1 + agrégation + détection, mis en cache
-  params.js     schéma des paramètres → formulaire UI ET validation API
+  params.js     schéma des SORTIES → formulaire UI ET validation API
+  probe.js      échelle de l'instrument
+
+lib/rfvg/
+  simulate.js   détection rFVG + branchement sur le moteur commun
+  params.js     schéma de DÉTECTION du rFVG
+  data.js, stats.js   points d'entrée historiques (réexports)
 
 pages/api/rfvg/
   run.js        une simulation complète (stats + positions)
@@ -74,7 +86,7 @@ convention a tranché — c'est la mesure de ce qu'elle coûte. Sur XAUUSD 5m à
 pts : 1 position sur 141. Sur un TP serré ou un TF haut, ce sera davantage.
 
 **Parité garantie par un test, pas par la relecture.** `scripts/rfvg-parity.mjs`
-rejoue 13 configurations (chaque branche de la machine à états : les trois
+rejoue 19 configurations (chaque branche de la machine à états : les quatre
 break-even, leurs cumuls, le trade unique, le cooldown, les trois modes de
 détection) et compare position par position `simulatePositions(fills:'bar')` à
 `calcRFVGPositions`. Vérifié identique sur XAUUSD 5m et Volatility 75 15m. Le
@@ -82,6 +94,46 @@ jour où les deux divergeront, on le saura par ce script — pas six semaines pl
 tard, par un écart de résultats inexpliqué.
 
 ## Ce que le simulateur ajoute à la règle en production
+
+`beSwingBars` — **break-even sur swing**. Les trois autres break-even posent le
+stop à un niveau lié à l'**entrée** (entrée ± `beLevelPts`) ; celui-là le pose sur
+la **structure**. Dès le premier swing formé pendant la position — swing bas en
+BUY, swing haut en SELL, extrême strictement au-delà des `beSwingBars` bougies de
+chaque côté (2 = « 2 avant, 2 après », la définition de l'indicateur SWING) — le
+stop passe sous ce swing bas − `slMarginPts`, ou sur ce swing haut + `slMarginPts`
+(la marge du stop structurel, pas `beLevelPts`).
+
+Trois propriétés à garder en tête pour l'interpréter :
+
+- **Le swing n'est connu qu'à la clôture de la `beSwingBars`-ième bougie qui suit
+  le pivot** — c'est cette bougie-là qui arme le déplacement, jamais le pivot.
+  Sans ce décalage, le réglage lirait l'avenir et tous ses résultats seraient
+  faux. Corollaire utile : la bougie qui arme appartient à la fenêtre droite du
+  swing, son extrême est donc au-delà du pivot — le stop déplacé ne peut pas être
+  touché sur elle.
+- **Un seul déplacement.** Profit, durée et swing partagent le même mouvement :
+  le premier armé pose le stop, les autres ne le rejouent pas. Ce n'est pas un
+  stop suiveur — le stop ne monte pas de swing en swing.
+- **Il ne peut que resserrer.** Un swing plus lâche que le stop structurel arme
+  le déclencheur (`beReason: 'swing'`) sans rien déplacer. Plus `beSwingBars` est
+  grand, plus le swing est rare et tardif : à 4/4 une bonne partie des positions
+  se résout avant qu'un seul pivot soit confirmé.
+
+**Absent de l'EA MT5** (`superFVG-EA.mq5`, `rFVG-Full-EA.mq5`) : si un réglage
+retenu l'utilise, l'EA doit être modifié avant de le trader.
+
+`beTouchTrigger` — **coupe sur retours à l'entrée**. Le seul déclencheur qui ne
+déplace rien : dès que le prix est revenu N fois sur l'entrée (une bougie dont
+l'amplitude contient le niveau compte pour un retour, B4 exclue), la position est
+**soldée au prix d'entrée** sur cette bougie — statut `be`, gain brut nul,
+`cutAtEntry: true`. C'est un abandon, pas une protection : on constate que le
+motif n'a pas travaillé et on rend la place, en payant le spread. Le compte se
+fait à la clôture de la bougie du TF, **même en `fills: 'm1'`** (il compte des
+bougies, pas des minutes), et après le stop et le TP : une bougie qui repasse par
+l'entrée et atteint le TP part au TP. Conséquence sur les statistiques : ces
+positions quittent la population TP/SL, donc le winrate et les deux études du bas
+de page ne portent plus que sur celles qui sont allées au bout. **Absent de l'EA
+MT5** lui aussi.
 
 `maxBars` — plafond de durée de vie. Sans lui, une position qui n'atteint ni son
 stop ni son TP reste ouverte jusqu'au bord des données (statut `open`) et ne
@@ -152,9 +204,21 @@ configurations qu'aucun formulaire ne rend lisibles.
   les excursions globales de chaque position : l'ordre intra-vie est inconnu à la
   granularité bougie. Un seuil qui en sort doit être **rejoué en simulation
   complète** avant d'être retenu.
-- Le spread est un coût fixe par position, pas un modèle bid/ask.
+- Le spread est un coût fixe par position, pas un modèle bid/ask : il est déduit
+  du résultat, il ne décale pas les niveaux, donc il ne peut pas déclencher un
+  stop qu'il aurait touché en réel. Il est appliqué par le **simulateur**, sur
+  chaque position **clôturée** : `profitPoints` reste le brut, `netPoints` est ce
+  qu'on encaisse, et c'est le net qui alimente les statistiques. Une position
+  encore ouverte au bord des données ne le paie pas.
 - Pas de sizing en capital : tout est en points, à lot fixe.
 - La détection n'est pas balayée. C'est délibéré (budget de liberté), mais ça
-  veut dire que l'optimiseur ne dira jamais « ton motif est mal réglé ».
-- Le cache tient 2 symboles en mémoire (~200 Mo chacun). `DELETE /api/rfvg/cache`
-  le vide sans redémarrer le serveur.
+  veut dire que l'optimiseur ne dira jamais « ton motif est mal réglé ». Le KO,
+  lui, l'autorise, avec un budget de liberté compté et un contrôle par décalage
+  obligatoire (`docs/ko-optimisation.md`).
+- `minTrades` ne marque rien quand il n'est pas transmis : `/api/rfvg/optimize`
+  fait `Number(b.minTrades) ?? 0`, or `Number(undefined)` vaut `NaN` et `n < NaN`
+  est toujours faux. Le CLI le transmet toujours, donc le défaut n'a jamais
+  mordu ; `/api/ko/optimize` utilise `|| 0`.
+- Le cache tient 2 symboles en mémoire (~200 Mo chacun). Il est maintenant
+  COMMUN à tous les motifs : `DELETE /api/rfvg/cache` (ou `/api/ko/cache`) le
+  vide sans redémarrer le serveur.

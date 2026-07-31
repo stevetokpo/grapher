@@ -1,10 +1,13 @@
-// /rapports — visionneuse des rapports JSON de positions rFVG (bouton
-// « Rapports » du graphe). Tout se passe côté client : on dépose le fichier,
-// la page recalcule stats, distributions et études BE / trailing à partir des
-// positions qu'il contient.
+// /rapports — visionneuse des rapports JSON de positions (boutons « Rapports »
+// et « KO » du graphe). Tout se passe côté client : on dépose le fichier, la page
+// recalcule stats, distributions et études BE / trailing à partir des positions
+// qu'il contient. Elle ne connaît aucun motif en particulier — il lui faut un
+// tableau `positions` et un `params.tpPts`, ce que produisent aussi bien le
+// rapport rFVG que le rapport KO ou celui de la pince liq.
 //
-// TOUT SE COMPTE EN POINTS. Le stop du rFVG est STRUCTUREL (posé à la clôture de
-// B4 sous/sur l'extrême B3-B4) : le risque varie fortement d'une position à
+// TOUT SE COMPTE EN POINTS. Le stop de ces stratégies est STRUCTUREL — sous ou
+// sur l'extrême de bougies du motif, que ce soit les deux dernières (rFVG, KO) ou
+// toutes (liq) : le risque varie fortement d'une position à
 // l'autre. Le lot, lui, est FIXE — c'est donc le gain en points qui est
 // proportionnel au résultat réel. Compter en R supposerait qu'on redimensionne
 // la position à chaque trade pour risquer le même montant, ce que la stratégie
@@ -26,7 +29,7 @@ import { useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import styles from '../styles/rapports.module.css';
-import { computeStats } from '../lib/rfvg/stats';
+import { computeStats } from '../lib/signals/stats';
 
 const BULL   = '#26A69A';
 const BEAR   = '#EF5350';
@@ -225,7 +228,7 @@ export default function RapportsPage() {
   };
 
   // Tout est redérivé des positions — le rapport reste la seule source. Le calcul
-  // lui-même vit dans lib/rfvg/stats.js, partagé avec la page /rfvg et l'API :
+  // lui-même vit dans lib/signals/stats.js, partagé avec les pages /rfvg et /ko
   // deux implémentations finiraient par donner deux chiffres pour le même
   // rapport, et il n'y aurait aucun moyen de savoir lequel croire.
   const d = useMemo(() => {
@@ -272,12 +275,13 @@ export default function RapportsPage() {
     ['id', '#'], ['direction', 'Dir'], ['status', 'Statut'], ['entryTime', 'Entrée'],
     ['risk0', 'Risque (pts)'], ['rr', 'RR'], ['barsHeld', 'Durée (bougies)'], ['entryTouches', "Retours sur l'entrée"],
     ['entryPrice', 'Prix entrée'], ['exitPrice', 'Prix sortie'],
-    ['profitPoints', 'Profit (pts)'], ['maxPullupPts', 'Pullup max (pts)'], ['maxDrawdownPts', 'Drawdown max (pts)'],
+    ['profitPoints', 'Profit brut (pts)'], ['netPoints', 'Profit net (pts)'],
+    ['maxPullupPts', 'Pullup max (pts)'], ['maxDrawdownPts', 'Drawdown max (pts)'],
   ];
 
   return (
     <div className={styles.page}>
-      <Head><title>Rapports rFVG — Grapher</title></Head>
+      <Head><title>Rapports de positions — Grapher</title></Head>
 
       <header className={styles.header}>
         <Link href="/" className={styles.logoLink}>
@@ -289,7 +293,7 @@ export default function RapportsPage() {
           </svg>
           <span className={styles.logoText}>GRAPHER</span>
         </Link>
-        <span className={styles.headerTitle}>RAPPORTS rFVG</span>
+        <span className={styles.headerTitle}>RAPPORTS DE POSITIONS</span>
         {report && (
           <div className={styles.headerFile}>
             <span>{fileName} · généré {fmtDate(report.generatedAt)}</span>
@@ -319,7 +323,7 @@ export default function RapportsPage() {
             <path d="M17 8l-5-5-5 5" />
             <path d="M12 3v12" />
           </svg>
-          <span className={styles.dropTitle}>Dépose un rapport rFVG</span>
+          <span className={styles.dropTitle}>Dépose un rapport rFVG, KO ou liq</span>
           <span className={styles.dropBody}>
             Glisse ici le fichier JSON téléchargé avec le bouton « Rapports » du graphe,
             ou clique pour le choisir. Tout est analysé localement, rien n'est envoyé.
@@ -386,6 +390,19 @@ export default function RapportsPage() {
               sub="creux maximal de la courbe cumulée" />
             <Tile label="Pertes d'affilée" value={d.maxLossStreak}
               sub="plus longue série, ordre d'entrée" />
+            {/* Combien de SL il faut encaisser avant de retrouver un TP. La
+                moyenne ne porte que sur les intervalles REFERMÉS par un TP ;
+                ceux qui traînent après le dernier gain sont dits à part, sinon
+                ils tireraient le chiffre vers le bas sans qu'on sache de combien. */}
+            <Tile label="SL entre deux TP"
+              value={d.slPerTpMean != null ? fmtNum(d.slPerTpMean, 2) : '—'}
+              color={d.slPerTpMean != null && d.slPerTpMean >= 3 ? AMBER : undefined}
+              sub={d.slGaps.length
+                ? `en moyenne · pire ${d.slPerTpMax} · ${d.slGaps.length} intervalle${d.slGaps.length > 1 ? 's' : ''}`
+                  + (d.slTrailing > 0 ? ` · ${d.slTrailing} SL depuis le dernier TP` : '')
+                : d.slTrailing > 0
+                  ? `aucun TP — ${d.slTrailing} SL depuis le début`
+                  : 'aucune position résolue'} />
             <Tile label="Durée médiane" value={d.durMed != null ? `${fmtNum(d.durMed, 1)} b.` : '—'}
               sub={d.durations.length
                 ? `moyenne ${fmtNum(d.durMean, 1)} · max ${d.durMax} bougies`
@@ -444,7 +461,7 @@ export default function RapportsPage() {
                   <> <b style={{ color: AMBER }}>Ce rapport a déjà un BE appliqué</b>
                   {' '}({[
                     (d.params.beTriggerPts ?? 0) > 0 && `profit ${d.params.beTriggerPts} pts`,
-                    (d.params.beTouchTrigger ?? 0) > 0 && `${d.params.beTouchTrigger} retour(s)`,
+                    (d.params.beTouchTrigger ?? 0) > 0 && `coupe à ${d.params.beTouchTrigger} retour(s)`,
                     (d.params.beBarsTrigger ?? 0) > 0 && `${d.params.beBarsTrigger} bougies`,
                   ].filter(Boolean).join(', ') || 'seuil inconnu'}, niveau {d.params.beLevelPts ?? 0} pts) :
                   les études ne portent que sur les positions TP/SL restantes, les sorties BE en
@@ -561,6 +578,11 @@ export default function RapportsPage() {
                         <td>{fmtNum(p.exitPrice, 2)}</td>
                         <td style={{ color: p.status === 'missed' ? 'var(--text-dim)' : p.status === 'be' ? AMBER : (p.profitPoints ?? 0) >= 0 ? BULL : BEAR }}>
                           {p.status === 'missed' ? '—' : fmtP(p.profitPoints)}
+                        </td>
+                        {/* Net = brut − spread de CETTE position. Absent des
+                            rapports antérieurs au champ : tiret, pas un faux zéro. */}
+                        <td style={{ color: p.netPoints == null || p.status === 'missed' ? 'var(--text-dim)' : p.netPoints >= 0 ? BULL : BEAR }}>
+                          {p.status === 'missed' || p.netPoints == null ? '—' : fmtP(p.netPoints)}
                         </td>
                         <td>{p.maxPullupPts   != null ? fmtNum(p.maxPullupPts, 1)   : '—'}</td>
                         <td>{p.maxDrawdownPts != null ? fmtNum(p.maxDrawdownPts, 1) : '—'}</td>

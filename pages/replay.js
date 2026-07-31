@@ -226,9 +226,8 @@ export default function ReplayPage() {
             indicators={indicators}
             htfBars={htfBars}
             patterns={effectivePatterns}
-            bullColor={settings?.bullColor ?? '#26A69A'}
-            bearColor={settings?.bearColor ?? '#EF5350'}
-            showVolume={settings?.showVolume ?? true}
+            settings={settings}
+            watermarkText={symbolName ? `${symbolName} · ${tfId.toUpperCase()}` : ''}
             cvdData={null}
             drawings={drawings}
             activeTool={activeTool}

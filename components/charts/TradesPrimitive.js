@@ -155,6 +155,13 @@ class TradesPaneView {
     const items = [];
 
     for (const t of trades) {
+      // Une position sans date ni prix n'a rien à dessiner — un signal dont
+      // l'ordre n'a jamais été rempli, par exemple. `timeToCoordinate(null)`
+      // JETTE au lieu de rendre null, donc ce garde-fou vient avant l'appel et
+      // non après : c'est ce qui a cassé le graphe la première fois.
+      if (t.entryTime == null || t.exitTime == null
+          || t.entryPrice == null || t.exitPrice == null) continue;
+
       const x1 = ts.timeToCoordinate(t.entryTime);
       const x2 = ts.timeToCoordinate(t.exitTime);
       const yEntry = series.priceToCoordinate(t.entryPrice);
@@ -174,7 +181,9 @@ class TradesPaneView {
         ySl: t.sl != null ? series.priceToCoordinate(t.sl) : null,
         yTp: t.tp != null ? series.priceToCoordinate(t.tp) : null,
         ySl0,
-        win: (t.profitPoints ?? 0) >= 0,
+        // Gagnante au NET quand la position le porte : un gain brut plus petit
+        // que le spread n'est pas un gain, et ne doit pas se peindre en vert.
+        win: (t.netPoints ?? t.profitPoints ?? 0) >= 0,
         status: t.status ?? null,
         selected: t.id === selectedId,
       });

@@ -287,6 +287,31 @@
 }
 .rfvgBtn:active { transform: scale(0.97); }
 
+/* ── Réglages KO (page /ko) ───────────────────────────────────── */
+.koBtn {
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+  background: rgba(167, 139, 250, 0.08);
+  color: #A78BFA;
+  box-shadow: var(--inset-hi);
+  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+.koBtn:hover {
+  background: rgba(167, 139, 250, 0.16);
+  border-color: rgba(167, 139, 250, 0.65);
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.25), var(--inset-hi);
+}
+.koBtn:active { transform: scale(0.97); }
+
 /* ── Alertes ──────────────────────────────────────────────────── */
 .alertsBtn {
   display: flex;

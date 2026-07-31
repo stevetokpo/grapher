@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import styles from '../styles/rfvg.module.css';
+import styles from '../styles/tuning.module.css';
 import { DETECT_SCHEMA, EXIT_SCHEMA, defaultsOf } from '../lib/rfvg/params';
 
 const BULL = '#26A69A', BEAR = '#EF5350', AMBER = '#F59E0B', BLUE = '#60A5FA', MUTED = '#94A3B8';

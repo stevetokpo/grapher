@@ -24,8 +24,8 @@ export default function StatsBar({ allBars, currentSym, loading }) {
   const isPos     = changePct != null ? changePct >= 0 : true;
   const variant   = isPos ? 'bull' : 'bear';
 
-  const high = allBars.length ? Math.max(...allBars.map(b => b.high)) : null;
-  const low  = allBars.length ? Math.min(...allBars.map(b => b.low))  : null;
+  const high = allBars.length ? allBars.reduce((m, b) => b.high > m ? b.high : m, -Infinity) : null;
+  const low  = allBars.length ? allBars.reduce((m, b) => b.low  < m ? b.low  : m,  Infinity) : null;
   const vol  = allBars.reduce((s, b) => s + (b.volume || 0), 0) || null;
 
   return (

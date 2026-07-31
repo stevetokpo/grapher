@@ -1,0 +1,27 @@
+{
+  "_": "Mission de l'optimiseur KO. Contrairement au rFVG, la DÉTECTION est réglable — mais chaque seuil balayé consomme du budget de liberté (~30 positions par paramètre) et doit passer le contrôle par décalage circulaire. Les valeurs ci-dessous sont le motif de départ, pas un réglage validé.",
+  "tf": "5m",
+  "split": 0.7,
+  "minTrades": 100,
+  "fills": "bar",
+  "detect": {
+    "direction": "both",
+    "maPeriodFast": 15,
+    "maPeriodSlow": 200,
+    "atrPeriod": 14,
+    "atrMult1": 1.3,
+    "bodyRatio1": 0.9,
+    "atrMult2": 0.3,
+    "bodyRatio2": 0.3
+  },
+  "symbols": {
+    "XAUUSD": {
+      "spread": 0.3,
+      "exit": { "slMarginPts": 0.5, "tpPts": 8 }
+    },
+    "Volatility 75 Index": {
+      "spread": 12,
+      "exit": { "slMarginPts": 5, "tpPts": 200 }
+    }
+  }
+}

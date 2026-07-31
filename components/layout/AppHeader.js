@@ -3,7 +3,7 @@ import styles from './AppHeader.module.css';
 
 export default function AppHeader({
   symbols, symbolId, onSymbolChange,
-  onImport, onManage, onSettings, onReplay, onRsi, onChat, onBacktest, onAlerts, onRfvg,
+  onImport, onManage, onSettings, onReplay, onRsi, onChat, onBacktest, onAlerts, onRfvg, onKo,
   isReplayMode = false,
   replaySymbolName = '',
   isRsiMode = false,
@@ -79,6 +79,15 @@ export default function AppHeader({
                 <path d="M1 14h6M9 8h6M17 16h6" />
               </svg>
               rFVG
+            </button>
+          )}
+          {onKo && (
+            <button className={styles.koBtn} onClick={onKo} aria-label="Réglages KO par symbole">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ marginRight: 5 }}>
+                <path d="M6 3v18" />
+                <path d="M18 3l-9 9 9 9" />
+              </svg>
+              KO
             </button>
           )}
           {onChat && (

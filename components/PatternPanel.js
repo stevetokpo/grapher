@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react';
 import styles from './PatternPanel.module.css';
+import { XFVG_DEFAULTS, FIELDS as XFVG_FIELDS } from '../lib/xfvg/params';
+import { LIQ_DEFAULTS,  FIELDS as LIQ_FIELDS  } from '../lib/liq/params';
+import { REV_DEFAULTS,  FIELDS as REV_FIELDS  } from '../lib/rev/params';
 
 const COLORS = [
   '#26A69A', '#EF5350', '#60A5FA', '#F59E0B',
   '#A78BFA', '#F472B6', '#34D399', '#FB923C',
+  // Bleu marine et rouge franc — les couleurs par défaut des niveaux liq. Sans
+  // elles dans la palette, cliquer une pastille par curiosité rendrait le
+  // réglage d'origine irrécupérable.
+  '#2B4FD8', '#E53935',
 ];
 
 // Add an entry here each time a new pattern is implemented.
@@ -57,6 +64,7 @@ export const PATTERN_TYPES = [
     minPts:       0,
     maPeriodFast: 15,
     maPeriodSlow: 200,
+    slowOpenOnly: false,
     atrPeriod: 14,
     atrMult:   1.5,
     atrMult3:  0,
@@ -67,13 +75,93 @@ export const PATTERN_TYPES = [
     // sous/sur l'extrême B3-B4 (marge en points), TP en points
     display:      'zone',
     slMarginPts:   2,
+    slCapPts:      0,
+    spreadPts:     0,
     tpPts:         10,
     beTriggerPts:  0,
     beTouchTrigger: 0,
     beBarsTrigger: 0,
+    beSwingBars:   0,
     beLevelPts:    0,
     uniqueTrade:   false,
     skipAfterTp:   0,
+  },
+  {
+    // xFVG — deux figures sous un même interrupteur, choisies par le réglage
+    // `mode` : l'imbalance 3 bougies (le motif nu de la famille rFVG) ou le
+    // retournement contra-MM en 2 bougies. Ni sous-familles (rFVG / superFVG),
+    // ni mode « position » : une zone, dans les deux cas.
+    // Ses réglages et son formulaire vivent dans lib/xfvg/params.js — c'est là
+    // qu'on ajoute une condition, pas ici. Ce bloc ne porte que l'identité.
+    type:   'XFVG',
+    label:  'xFVG',
+    desc:   'Imbalance 3 bougies, ou retournement contra-MM en 2 bougies — au choix',
+    color:  '#38BDF8',
+    render: 'zone',
+    ...XFVG_DEFAULTS,
+  },
+  {
+    // liq — la pince : deux impulsions opposées séparées par une respiration,
+    // SANS gap à trouver. Née dans le xFVG, sortie en pattern autonome parce
+    // qu'elle ne cherche aucun déséquilibre : ce n'est plus la même famille.
+    // Réglages et formulaire dans lib/liq/params.js.
+    type:   'LIQ',
+    label:  'liq',
+    desc:   'Deux impulsions opposées séparées par une respiration — sans imbalance',
+    color:  '#A78BFA',
+    render: 'zone',
+    ...LIQ_DEFAULTS,
+  },
+  {
+    // rev — pause, puis retournement en DEUX impulsions opposées et collées. Même
+    // famille que liq (retournement, gestion partagée), mais la respiration est
+    // AVANT les impulsions au lieu d'être entre elles.
+    type:   'REV',
+    label:  'rev',
+    desc:   'Une pause, puis deux impulsions opposées — le sens est celui de la seconde',
+    color:  '#34D399',
+    render: 'zone',
+    ...REV_DEFAULTS,
+  },
+  {
+    // KO — la sœur du rFVG en DEUX bougies : même famille (impulsion à
+    // contre-courant des deux MM, entrée au marché sur la bougie suivante, stop
+    // structurel), mais le motif se lit dans la FORME des bougies et non dans un
+    // gap. Ces défauts sont ceux de lib/ko/pattern.js : les changer ici ferait
+    // mentir le graphe par rapport à la page /ko.
+    type:      'KO',
+    label:     'KO',
+    desc:      'Impulsion pleine à contre-courant des 2 MM, suivie d’une bougie indécise',
+    color:     '#A78BFA',
+    render:    'zone',
+    direction: 'both',
+    maPeriodFast: 15,
+    maPeriodSlow: 200,
+    atrPeriod:  14,
+    atrMult1:   1.3,
+    bodyRatio1: 0.9,
+    atrMult2:   0.3,
+    bodyRatio2: 0.3,
+    extLen:     20,
+    bullColor: '#26A69A',
+    bearColor: '#EF5350',
+    opacity:   0.18,
+    showLabel: true,
+    // Mode « position » : entrée marché à l'ouverture de la 3e bougie, stop
+    // structurel sous/sur l'extrême B2-B3 (marge en points), TP en points.
+    display:        'zone',
+    slMarginPts:     2,
+    slCapPts:        0,
+    spreadPts:       0,
+    tpPts:           10,
+    beTriggerPts:    0,
+    beTouchTrigger:  0,
+    beBarsTrigger:   0,
+    beSwingBars:     0,
+    beLevelPts:      0,
+    maxBars:         0,
+    uniqueTrade:     false,
+    skipAfterTp:     0,
   },
   {
     type:      'HBH_BHB',
@@ -147,6 +235,7 @@ export const PATTERN_TYPES = [
     // Mode « position » : entrée marché à l'ouverture de X, SL = extrême M–X, TP en points
     display:   'levels',
     tpPts:     10,
+    spreadPts: 0,
   },
 ];
 
@@ -198,6 +287,88 @@ function Swatches({ value, onChange: onCh }) {
       ))}
     </div>
   );
+}
+
+// ── Formulaire décrit par schéma ──────────────────────────────────────────────
+//
+// Les motifs historiques écrivent leur formulaire à la main, un bloc JSX par
+// motif — d'où les 250 lignes du rFVG, où ajouter un réglage veut dire recopier
+// un champ de plus. Les motifs récents (xFVG) décrivent plutôt leurs champs
+// dans leur module de réglages, et c'est ce composant qui les dessine. Rien
+// n'oblige à convertir les anciens : les deux cohabitent.
+//
+// Un champ : { kind, key, label, ...options } — cf. lib/xfvg/params.js.
+
+function SchemaField({ field, form, defaults, setF }) {
+  const { kind, key, label } = field;
+
+  // `when` juge sur les réglages EFFECTIFS (formulaire par-dessus les défauts),
+  // pas sur le seul formulaire : un motif enregistré avant l'ajout d'un réglage
+  // n'en a pas la clé, et le champ resterait masqué à tort.
+  if (field.when && !field.when({ ...defaults, ...form })) return null;
+
+  if (kind === 'divider') return <div className={styles.sectionDivider}>{label}</div>;
+  if (kind === 'hint')    return <p className={styles.hint}>{field.text}</p>;
+  if (kind === 'row') {
+    return (
+      <div className={styles.fieldRow}>
+        {field.fields.map(f => (
+          <SchemaField key={f.key} field={f} form={form} defaults={defaults} setF={setF} />
+        ))}
+      </div>
+    );
+  }
+
+  const value = form[key] ?? defaults[key];
+
+  return (
+    <div className={styles.field}>
+      <span className={styles.label} style={field.tint ? { color: field.tint } : undefined}>
+        {label}
+      </span>
+
+      {kind === 'number' && (
+        <NumInput
+          value={value}
+          min={field.min} max={field.max} step={field.step ?? 1}
+          onChange={v => setF({ [key]: v })}
+        />
+      )}
+
+      {kind === 'toggle' && (
+        <button
+          className={`${styles.toggleBtn}${value === true ? ` ${styles.toggleBtnOn}` : ''}`}
+          onClick={() => setF({ [key]: value !== true })}
+        >
+          {value === true ? (field.on ?? 'Activée') : (field.off ?? 'Désactivée')}
+        </button>
+      )}
+
+      {kind === 'segmented' && (
+        <div className={styles.segmented}>
+          {field.options.map(o => (
+            <button
+              key={o.value}
+              className={`${styles.segBtn}${value === o.value ? ` ${styles.segBtnActive}` : ''}`}
+              onClick={() => setF({ [key]: o.value })}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {kind === 'color' && (
+        <Swatches value={value} onChange={c => setF({ [key]: c })} />
+      )}
+    </div>
+  );
+}
+
+function SchemaForm({ fields, form, defaults, setF }) {
+  return fields.map((f, i) => (
+    <SchemaField key={f.key ?? `${f.kind}-${i}`} field={f} form={form} defaults={defaults} setF={setF} />
+  ));
 }
 
 // ── PatternPanel ──────────────────────────────────────────────────────────────
@@ -516,6 +687,57 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
           </div>
         )}
 
+        {/* xFVG — aucun champ écrit ici : tout vient de lib/xfvg/params.js. */}
+        {editingType === 'XFVG' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>imbalance 3 bougies, sans moyennes</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={XFVG_FIELDS} form={form} defaults={XFVG_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {/* liq — aucun champ écrit ici : tout vient de lib/liq/params.js. */}
+        {editingType === 'LIQ' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>impulsion · respiration · impulsion inverse</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={LIQ_FIELDS} form={form} defaults={LIQ_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {/* rev — aucun champ écrit ici : tout vient de lib/rev/params.js. */}
+        {editingType === 'REV' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>pause · impulsion · impulsion inverse</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={REV_FIELDS} form={form} defaults={REV_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
         {editingType === 'RFVG' && (
           <div className={styles.formSection}>
             <div className={styles.formHeader}>
@@ -613,6 +835,22 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
               au-dessus de la MM rapide ET de la MM lente (baissier), son plus haut en dessous des
               deux (haussier). Elle ne touche jamais aucune des deux. En mode « Toutes », les MM ne
               filtrent plus rien mais servent encore à étiqueter les zones.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>MM lente — ouverture seule</span>
+              <button
+                className={`${styles.toggleBtn}${form.slowOpenOnly === true ? ` ${styles.toggleBtnOn}` : ''}`}
+                onClick={() => setF({ slowOpenOnly: form.slowOpenOnly !== true })}
+              >
+                {form.slowOpenOnly === true ? 'Activée' : 'Désactivée'}
+              </button>
+            </div>
+            <p className={styles.hint}>
+              Desserre la MM LENTE, et elle seule : seule l'OUVERTURE de la centrale doit être du bon
+              côté — au-dessus si baissière, en dessous si haussière — sa clôture a le droit d'être de
+              l'autre. La bougie traverse alors la MM lente au lieu de rester à distance. La MM rapide
+              reste jugée mèche comprise.
             </p>
 
             <div className={styles.field}>
@@ -741,6 +979,39 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
                   donnent la moyenne, et tout ce qui est en R est normalisé position par position.
                 </p>
 
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>SL plafonné — perte max (points, 0 = OFF)</span>
+                    <NumInput
+                      value={form.slCapPts ?? 0}
+                      min={0} max={100000} step={0.1}
+                      onChange={v => setF({ slCapPts: v })}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Spread (points)</span>
+                    <NumInput
+                      value={form.spreadPts ?? 0}
+                      min={0} max={100000} step={0.1}
+                      onChange={v => setF({ spreadPts: v })}
+                    />
+                  </div>
+                </div>
+                <p className={styles.hint}>
+                  Un vrai SL, pas un break-even : la position est soldée dès ce nombre de points
+                  contre l'entrée, même si le SL structurel n'est pas atteint (issue <b>rouge</b>,
+                  comme un SL). Le stop retenu est le <b>plus serré</b> des deux, donc le risque
+                  cesse de varier au-delà de ce plafond. C'est aussi le seul stop actif pendant B4 :
+                  posé avec l'ordre, il n'a pas besoin de la clôture de B4 pour exister.
+                </p>
+                <p className={styles.hint}>
+                  Le <b>spread</b> est déduit de chaque position <b>clôturée</b> : le moniteur, le
+                  rapport et la couleur des trades passent au <b>net</b>. Le profit brut reste dans le
+                  rapport à côté du net — c'est lui qui se relit entre les deux traits du graphe. Une
+                  sortie BE au prix d'entrée rend donc un brut nul et un net négatif : le spread reste
+                  dû. Mettre ici le vrai spread du symbole est le seul moyen de voir si l'edge y survit.
+                </p>
+
                 <div className={styles.field}>
                   <span className={styles.label}>Trade unique</span>
                   <button
@@ -796,7 +1067,7 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
                 </div>
                 <div className={styles.fieldRow}>
                   <div className={styles.field}>
-                    <span className={styles.label}>BE sur retours à l'entrée (nb, 0 = off)</span>
+                    <span className={styles.label}>Coupe sur retours à l'entrée (nb, 0 = off)</span>
                     <NumInput
                       value={form.beTouchTrigger ?? 0}
                       min={0} max={500} step={1}
@@ -812,20 +1083,40 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
                     />
                   </div>
                 </div>
+                <div className={styles.field}>
+                  <span className={styles.label}>BE sur swing (bougies de chaque côté, 0 = off)</span>
+                  <NumInput
+                    value={form.beSwingBars ?? 0}
+                    min={0} max={50} step={1}
+                    onChange={v => setF({ beSwingBars: v })}
+                  />
+                </div>
                 <p className={styles.hint}>
-                  Trois déclencheurs indépendants, aux effets différents.
+                  <b>Swing</b> déplace le <b>stop</b> sous la structure, pas au BE : on attend le
+                  premier swing formé pendant la position — un swing <b>bas</b> en BUY, <b>haut</b>
+                  {' '}en SELL, confirmé par N bougies avant et N après (2 = la définition
+                  habituelle, la même que l'indicateur SWING) — et le stop passe sous ce swing bas
+                  (ou sur ce swing haut) avec la <b>marge du SL</b>. Le swing n'étant connu qu'à la
+                  clôture de la Nième bougie qui le suit, le stop ne bouge que là : pas de
+                  lookahead. Un seul déplacement, sur le premier swing, et jamais dans le sens qui
+                  élargit le risque.
+                </p>
+                <p className={styles.hint}>
+                  Quatre déclencheurs indépendants, aux effets différents.
                   {' '}<b>Profit</b> et <b>Durée</b> déplacent le <b>stop</b> à entrée ± niveau
                   (0 = entrée exacte, positif = gain verrouillé, négatif = perte réduite ; jamais
                   au-delà du stop structurel) — profit dès que le gain atteint le seuil (évalué dès
                   B4), durée dès que la position tient depuis N bougies. Sortie sur ce stop :
                   trait <b style={{ color: '#F59E0B' }}>ambre</b>.
-                  {' '}<b>Retours</b> déplace le <b>TP</b> au miroir du SL (entrée ± risk0, même
-                  distance que le stop côté profit = objectif 1R) dès que le prix est revenu N fois
-                  sur l'entrée ; le stop structurel reste, la position vise ce gain de 1R au lieu
-                  du TP d'origine. Attention : « même distance que le SL » n'est plus proche que si
-                  le SL structurel est plus serré que le TP — sinon le TP réduit est plus loin.
-                  Pessimiste : stop et TP testés avant l'armement (un TP l'emporte), un BE traversé
-                  en gap rempli au pire de l'open.
+                  {' '}<b>Retours</b> ne déplace rien : il <b>coupe</b>. Dès que le prix est revenu
+                  N fois sur l'entrée, la position est soldée <b>au prix d'entrée</b> — sortie
+                  {' '}<b style={{ color: '#F59E0B' }}>ambre</b> elle aussi, gain brut nul, le
+                  spread reste dû. C'est un abandon, pas une protection : le motif n'a pas
+                  travaillé, on rend la place. Pessimiste : stop et TP testés avant les
+                  déclencheurs (un TP l'emporte sur sa bougie), un BE traversé en gap rempli au
+                  pire de l'open. <b>Profit</b>, <b>Durée</b> et <b>Swing</b>
+                  {' '}déplacent tous les trois le stop, mais il ne bouge qu'<b>une fois</b> : le
+                  premier armé pose le stop, les suivants ne le rejouent pas.
                 </p>
               </>
             )}
@@ -874,6 +1165,364 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
                   {form.showLabel !== false ? 'Activés' : 'Désactivés'}
                 </button>
               </div>
+            </div>
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {editingType === 'KO' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>2 bougies — impulsion pleine, puis respiration</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <p className={styles.hint}>
+              <b>B1</b> — l'impulsion : bougie <b>pleine</b> (gros corps, peu de mèche) entièrement
+              du côté opposé à son sens par rapport aux <b>deux</b> MM. Haussière sous les deux MM
+              → KO <b>haussier</b> ; baissière au-dessus des deux → KO <b>baissier</b>.
+              <b> B2</b> — la respiration : petite et indécise, <b>quel que soit son sens</b>.
+              Entrée à l'ouverture de la 3e bougie.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Direction</span>
+              <div className={styles.segmented}>
+                {[
+                  { value: 'bull', label: '↑ Haussier' },
+                  { value: 'both', label: '↕ Les deux' },
+                  { value: 'bear', label: '↓ Baissier' },
+                ].map(o => (
+                  <button
+                    key={o.value}
+                    className={`${styles.segBtn}${form.direction === o.value ? ` ${styles.segBtnActive}` : ''}`}
+                    onClick={() => setF({ direction: o.value })}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.label} style={{ color: '#26A69A' }}>Couleur haussière</span>
+              <Swatches value={form.bullColor ?? '#26A69A'} onChange={c => setF({ bullColor: c })} />
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.label} style={{ color: '#EF5350' }}>Couleur baissière</span>
+              <Swatches value={form.bearColor ?? '#EF5350'} onChange={c => setF({ bearColor: c })} />
+            </div>
+
+            <div className={styles.sectionDivider}>Moyennes mobiles</div>
+
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <span className={styles.label}>MM rapide — période</span>
+                <NumInput
+                  value={form.maPeriodFast ?? 15}
+                  min={2} max={400} step={1}
+                  onChange={v => setF({ maPeriodFast: v })}
+                />
+              </div>
+              <div className={styles.field}>
+                <span className={styles.label}>MM lente — période</span>
+                <NumInput
+                  value={form.maPeriodSlow ?? 200}
+                  min={2} max={400} step={1}
+                  onChange={v => setF({ maPeriodSlow: v })}
+                />
+              </div>
+            </div>
+            <p className={styles.hint}>
+              B1 doit être entièrement d'un côté des DEUX moyennes à la fois, <b>mèches
+              comprises</b> : son plus haut sous les deux (haussière) ou son plus bas au-dessus des
+              deux (baissière). Elle n'en touche aucune. B2, elle, est libre : elle ne porte pas le
+              motif, elle le confirme par sa petitesse.
+            </p>
+
+            <div className={styles.sectionDivider}>B1 — l'impulsion</div>
+
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <span className={styles.label}>Période ATR</span>
+                <NumInput
+                  value={form.atrPeriod ?? 14}
+                  min={1} max={200} step={1}
+                  onChange={v => setF({ atrPeriod: v })}
+                />
+              </div>
+              <div className={styles.field}>
+                <span className={styles.label}>Corps ≥ ATR × (0 = off)</span>
+                <NumInput
+                  value={form.atrMult1 ?? 1.3}
+                  min={0} max={20} step={0.1}
+                  onChange={v => setF({ atrMult1: v })}
+                />
+              </div>
+            </div>
+            <div className={styles.field}>
+              <span className={styles.label}>Corps / amplitude ≥ (0 = off)</span>
+              <NumInput
+                value={form.bodyRatio1 ?? 0.9}
+                min={0} max={1} step={0.05}
+                onChange={v => setF({ bodyRatio1: v })}
+              />
+            </div>
+            <p className={styles.hint}>
+              Deux conditions à passer ensemble : la bougie est <b>grosse</b> (corps vs ATR) et
+              <b> pleine</b> (0,9 = au plus 10 % de mèche). L'ATR est lu <b>avant B1</b>, sinon il
+              contiendrait déjà la bougie à qualifier — et c'est le <b>même</b> ATR qui sert aux
+              deux bougies, pour que « ATR » ne désigne qu'une seule chose dans le motif.
+            </p>
+
+            <div className={styles.sectionDivider}>B2 — la respiration</div>
+
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <span className={styles.label}>Corps ≤ ATR × (0 = off)</span>
+                <NumInput
+                  value={form.atrMult2 ?? 0.3}
+                  min={0} max={20} step={0.05}
+                  onChange={v => setF({ atrMult2: v })}
+                />
+              </div>
+              <div className={styles.field}>
+                <span className={styles.label}>Corps / amplitude ≤ (1 = off)</span>
+                <NumInput
+                  value={form.bodyRatio2 ?? 0.3}
+                  min={0} max={1} step={0.05}
+                  onChange={v => setF({ bodyRatio2: v })}
+                />
+              </div>
+            </div>
+            <p className={styles.hint}>
+              Miroir de B1 : petite dans l'absolu <i>et</i> indécise dans sa forme (surtout de la
+              mèche). Son <b>sens n'entre pas</b> dans le motif — haussière ou baissière, seule sa
+              taille compte. Une bougie parfaitement plate (haut = bas) passe : c'est le comble de
+              l'indécision.
+            </p>
+
+            <div className={styles.sectionDivider}>Affichage</div>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Représentation</span>
+              <div className={styles.segmented}>
+                {[
+                  { value: 'zone',     label: 'Zone' },
+                  { value: 'position', label: 'Position' },
+                  { value: 'both',     label: 'Les deux' },
+                ].map(o => (
+                  <button
+                    key={o.value}
+                    className={`${styles.segBtn}${(form.display ?? 'zone') === o.value ? ` ${styles.segBtnActive}` : ''}`}
+                    onClick={() => setF({ display: o.value })}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {(form.display ?? 'zone') !== 'zone' && (
+              <>
+                <p className={styles.hint}>
+                  Entrée AU MARCHÉ à l'ouverture de la 3e bougie (achat sur motif haussier, vente
+                  sur baissier) : pas d'ordre en attente, la position est toujours prise. Le stop
+                  n'est pas une distance — il est posé à la <b>clôture</b> de la bougie d'entrée
+                  sous l'extrême <b>B2–B3</b> (haussier) ou dessus (baissier), marge comprise. La
+                  grosse bougie B1 n'entre <b>pas</b> dans le stop : c'est ce qui rend le risque
+                  petit et l'invalidation nette. Pendant toute la bougie d'entrée la position est
+                  non protégée, seul le TP est actif. Trait épais : <b>vert</b> TP, <b>rouge</b> SL,
+                  <b style={{ color: '#F59E0B' }}> ambre</b> BE.
+                </p>
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>SL — marge sous/sur l'extrême B2-B3 (points)</span>
+                    <NumInput
+                      value={form.slMarginPts ?? 2}
+                      min={0} max={100000} step={0.1}
+                      onChange={v => setF({ slMarginPts: v })}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>TP (points)</span>
+                    <NumInput
+                      value={form.tpPts ?? 10}
+                      min={0.1} max={100000} step={0.1}
+                      onChange={v => setF({ tpPts: v })}
+                    />
+                  </div>
+                </div>
+                <p className={styles.hint}>
+                  Le risque varie d'une position à l'autre : c'est la taille de B2-B3 qui le fait,
+                  plus la marge. Le RR n'est donc pas un réglage. Tout se compte en <b>points</b>,
+                  à lot fixe. Le calibrage sérieux (par symbole, in-sample / out-of-sample, contrôle
+                  par décalage) se fait sur la page <b>/ko</b>, pas ici : le graphe ne voit que les
+                  bougies chargées.
+                </p>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>SL plafonné — perte max (points, 0 = OFF)</span>
+                    <NumInput
+                      value={form.slCapPts ?? 0}
+                      min={0} max={100000} step={0.1}
+                      onChange={v => setF({ slCapPts: v })}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Spread (points)</span>
+                    <NumInput
+                      value={form.spreadPts ?? 0}
+                      min={0} max={100000} step={0.1}
+                      onChange={v => setF({ spreadPts: v })}
+                    />
+                  </div>
+                </div>
+                <p className={styles.hint}>
+                  Un vrai SL, pas un break-even : la position est soldée dès ce nombre de points
+                  contre l'entrée, même si le SL structurel n'est pas atteint. Le stop retenu est le
+                  <b> plus serré</b> des deux, et c'est le seul actif pendant la bougie d'entrée —
+                  une distance n'a pas besoin d'attendre une clôture pour être posée.
+                </p>
+                <p className={styles.hint}>
+                  Le <b>spread</b> est déduit de chaque position <b>clôturée</b> : moniteur, rapport
+                  et couleur des trades passent au <b>net</b>, le brut restant lisible à côté. Une
+                  sortie BE au prix d'entrée rend un brut nul et un net négatif — le spread reste dû.
+                </p>
+
+                <div className={styles.field}>
+                  <span className={styles.label}>Trade unique</span>
+                  <button
+                    className={`${styles.toggleBtn}${form.uniqueTrade === true ? ` ${styles.toggleBtnOn}` : ''}`}
+                    onClick={() => setF({ uniqueTrade: form.uniqueTrade !== true })}
+                  >
+                    {form.uniqueTrade === true ? 'Activé' : 'Désactivé'}
+                  </button>
+                </div>
+                <p className={styles.hint}>
+                  Une seule position à la fois : tant qu'elle n'est pas clôturée, tout nouveau motif
+                  est ignoré, dans son sens comme à contre-sens.
+                </p>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Signaux sautés après un TP (0 = off)</span>
+                    <NumInput
+                      value={form.skipAfterTp ?? 0}
+                      min={0} max={50} step={1}
+                      onChange={v => setF({ skipAfterTp: v })}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Durée max (bougies, 0 = off)</span>
+                    <NumInput
+                      value={form.maxBars ?? 0}
+                      min={0} max={20000} step={1}
+                      onChange={v => setF({ maxBars: v })}
+                    />
+                  </div>
+                </div>
+                <p className={styles.hint}>
+                  Après un gain, on saute les N prochains signaux ; chaque signal sauté est simulé
+                  à blanc et recharge le compteur s'il aurait aussi gagné. <b>Durée max</b> solde la
+                  position à la clôture de la Nième bougie (statut « timeout ») au lieu de la
+                  laisser ouverte jusqu'au bord des données.
+                </p>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>BE : seuil d'activation (points, 0 = off)</span>
+                    <NumInput
+                      value={form.beTriggerPts ?? 0}
+                      min={0} max={100000} step={0.1}
+                      onChange={v => setF({ beTriggerPts: v })}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>BE : niveau (points vs entrée)</span>
+                    <NumInput
+                      value={form.beLevelPts ?? 0}
+                      min={-100000} max={100000} step={0.1}
+                      onChange={v => setF({ beLevelPts: v })}
+                    />
+                  </div>
+                </div>
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Coupe sur retours à l'entrée (nb, 0 = off)</span>
+                    <NumInput
+                      value={form.beTouchTrigger ?? 0}
+                      min={0} max={100} step={1}
+                      onChange={v => setF({ beTouchTrigger: v })}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>BE sur durée (bougies tenues, 0 = off)</span>
+                    <NumInput
+                      value={form.beBarsTrigger ?? 0}
+                      min={0} max={5000} step={1}
+                      onChange={v => setF({ beBarsTrigger: v })}
+                    />
+                  </div>
+                </div>
+                <div className={styles.field}>
+                  <span className={styles.label}>BE sur swing (bougies de chaque côté, 0 = off)</span>
+                  <NumInput
+                    value={form.beSwingBars ?? 0}
+                    min={0} max={50} step={1}
+                    onChange={v => setF({ beSwingBars: v })}
+                  />
+                </div>
+                <p className={styles.hint}>
+                  Quatre déclencheurs, aux effets différents. <b>Profit</b> et <b>Durée</b> déplacent
+                  le <b>stop</b> à entrée ± niveau (jamais au-delà du stop structurel).
+                  {' '}<b>Swing</b> le déplace sous la <b>structure</b> : au premier swing formé
+                  pendant la position (bas en BUY, haut en SELL, confirmé par N bougies de chaque
+                  côté), avec la marge du SL. <b>Retours</b> ne déplace rien et <b>coupe</b> la
+                  position au prix d'entrée après N retours sur l'entrée. Les trois premiers se partagent
+                  <b> un seul</b> déplacement : le premier armé pose le stop. Réglages identiques à
+                  ceux du rFVG — c'est le même moteur de sortie.
+                </p>
+              </>
+            )}
+
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <span className={styles.label}>Extension de la zone (barres)</span>
+                <NumInput
+                  value={form.extLen ?? 20}
+                  min={1} max={500} step={1}
+                  onChange={v => setF({ extLen: v })}
+                />
+              </div>
+              <div className={styles.field}>
+                <span className={styles.label}>Opacité</span>
+                <NumInput
+                  value={form.opacity ?? 0.18}
+                  min={0.05} max={0.6} step={0.01}
+                  onChange={v => setF({ opacity: v })}
+                />
+              </div>
+            </div>
+            <p className={styles.hint}>
+              La boîte encadre les deux bougies du motif et se prolonge de ce nombre de barres à
+              droite de B2, puis est coupée net.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Labels</span>
+              <button
+                className={`${styles.toggleBtn}${form.showLabel !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                onClick={() => setF({ showLabel: form.showLabel === false })}
+              >
+                {form.showLabel !== false ? 'Activés' : 'Désactivés'}
+              </button>
             </div>
 
             <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
@@ -1375,14 +2024,28 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
                   Pas de break-even. Suivi à partir de X+1, stop testé avant le TP (pessimiste).
                   Le trait du milieu donne l'issue : <b>vert</b> TP, <b>rouge</b> SL, <b>gris</b> encore ouverte.
                 </p>
-                <div className={styles.field}>
-                  <span className={styles.label}>TP (points)</span>
-                  <NumInput
-                    value={form.tpPts ?? 10}
-                    min={0.1} max={100000} step={0.1}
-                    onChange={v => setF({ tpPts: v })}
-                  />
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>TP (points)</span>
+                    <NumInput
+                      value={form.tpPts ?? 10}
+                      min={0.1} max={100000} step={0.1}
+                      onChange={v => setF({ tpPts: v })}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Spread (points)</span>
+                    <NumInput
+                      value={form.spreadPts ?? 0}
+                      min={0} max={100000} step={0.1}
+                      onChange={v => setF({ spreadPts: v })}
+                    />
+                  </div>
                 </div>
+                <p className={styles.hint}>
+                  Le spread est déduit de chaque position <b>clôturée</b> : le brut reste dans le
+                  rapport, le net est ce qu'on encaisse, et c'est lui que l'espérance affichée compte.
+                </p>
               </>
             )}
 

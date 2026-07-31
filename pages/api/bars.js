@@ -82,7 +82,7 @@ export default async function handler(req, res) {
   const id = parseInt(symbolId, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'invalid symbolId' });
 
-  const n = Math.min(parseInt(limit, 10) || 500, 5000);
+  const n = Math.max(1, parseInt(limit, 10) || 500);
 
   try {
     const sql = buildBarsQuery(id, tf, n, from, to);

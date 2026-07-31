@@ -2,8 +2,10 @@
 //
 // Un symbole en cache, c'est son historique M1 complet en mémoire : ~200 Mo pour
 // 300 000 bougies, agrégations comprises. Le cache est plafonné à 2 symboles
-// (lib/rfvg/data.js), mais après une longue session d'optimisation multi-symboles
-// on veut pouvoir rendre la mémoire au serveur dev sans le redémarrer.
+// (lib/signals/data.js), mais après une longue session d'optimisation
+// multi-symboles on veut pouvoir rendre la mémoire au serveur dev sans le
+// redémarrer. Le cache étant COMMUN à tous les motifs, purger ici purge aussi le
+// KO — même route, même effet, que l'on passe par /api/rfvg/cache ou /api/ko/cache.
 
 import { cacheInfo, clearCache } from '../../../lib/rfvg/data';
 
