@@ -62,9 +62,11 @@ export default function ReplayPage() {
     play, pause, stepForward, stepBack, seekToPercent,
   } = useReplay(allM1Bars, tfId);
 
-  // Séries HTF pour TRENDER. Bornées à la dernière bougie VISIBLE : en replay le
-  // curseur est la seule vérité, aucune bougie future ne doit entrer dans le calcul.
-  const htfBars = useHtfBars(symIdStr ? parseInt(symIdStr, 10) : null, indicators, visibleBars);
+  // Séries HTF pour TRENDER et le motif RSIER. Bornées à la dernière bougie
+  // VISIBLE : en replay le curseur est la seule vérité, aucune bougie future ne
+  // doit entrer dans le calcul.
+  const htfBars = useHtfBars(
+    symIdStr ? parseInt(symIdStr, 10) : null, indicators, effectivePatterns, visibleBars);
 
   const {
     openTrades, closedTrades, stats,

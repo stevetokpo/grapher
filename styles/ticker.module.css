@@ -1,0 +1,346 @@
+/* Page /ticker — vue au tick.
+   Trois bandes fixes (entête, réglages, état) et une seule zone qui respire :
+   le graphe. C'est lui qu'on regarde, tout le reste doit savoir se taire. */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+/* ── Barre de réglages ─────────────────────────────────────────────────── */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.barLabel {
+  font: 600 9px/1 var(--font);
+  letter-spacing: 0.11em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.segment {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.segBtn {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.segBtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.segBtnOn,
+.segBtnOn:hover {
+  background: var(--blue);
+  color: #06121f;
+  font-weight: 600;
+}
+
+/* Le pas « tick » n'est pas un pas de temps comme les autres : il ne moyenne
+   rien. Sa lettre le rappelle avant qu'on clique. */
+.segBtnTick {
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.segBtn:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+
+.sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-2);
+}
+
+.spacer { flex: 1; }
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 11px/1 var(--font);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.check input {
+  accent-color: var(--blue);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+}
+
+/* ── Témoin de direct ──────────────────────────────────────────────────── */
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font: 600 10px/1 var(--font);
+  letter-spacing: 0.1em;
+}
+
+.live em {
+  font: 400 10px/1 var(--font-mono);
+  letter-spacing: 0;
+  font-style: normal;
+  opacity: 0.75;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Trois âges, trois lectures : ça arrive / ça tarde / ça ne vient plus.
+   L'expert poste à chaque clôture M1 — au-delà d'une minute et demie sans
+   rien, quelque chose ne tourne pas. */
+.live_ok    { color: var(--bull);  background: var(--bull-bg);  border-color: var(--bull-ring); }
+.live_warn  { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-ring); }
+.live_stale { color: var(--bear);  background: var(--bear-bg);  border-color: var(--bear-ring); }
+
+.live_ok .dot { animation: pulse 2s ease-in-out infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live_ok .dot { animation: none; }
+}
+
+.livePin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-ring);
+  color: var(--amber);
+  font: 600 10px/1 var(--font);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.livePin:hover { background: rgba(245, 158, 11, 0.18); }
+
+/* ── Zone du graphe ────────────────────────────────────────────────────── */
+.chartArea {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background:
+    radial-gradient(ellipse 120% 100% at 50% 42%, rgba(0, 0, 0, 0) 52%, rgba(0, 0, 0, 0.42) 100%),
+    linear-gradient(180deg, #0E1422 0%, #080B13 100%);
+}
+
+.center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font: 500 13px/1 var(--font);
+}
+
+.error { color: var(--bear); }
+
+.moreBadge {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 3;
+  padding: 4px 9px;
+  border-radius: 5px;
+  background: rgba(13, 18, 32, 0.9);
+  border: 1px solid var(--border-2);
+  color: var(--text-dim);
+  font: 500 10px/1 var(--font-mono);
+}
+
+/* ── Lecture instantanée, posée sur le graphe ──────────────────────────── */
+.readout {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  z-index: 3;
+  pointer-events: none;   /* ne vole jamais un clic au graphe */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.readPrice {
+  font: 600 26px/1 var(--font-mono);
+  letter-spacing: -0.02em;
+  color: var(--text);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+}
+
+.readGrid {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statLabel {
+  font: 500 9px/1 var(--font);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.statValue {
+  font: 500 12px/1 var(--font-mono);
+  color: var(--text-muted);
+}
+
+.tone_bull { color: var(--bull); }
+.tone_bear { color: var(--bear); }
+
+.readStamp {
+  font: 400 10px/1 var(--font-mono);
+  color: var(--text-ghost);
+}
+
+/* ── Pied de page : couverture ─────────────────────────────────────────── */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 14px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  font: 400 11px/1 var(--font-mono);
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.statusStrong { color: var(--text); font-weight: 600; }
+.statusDim    { color: var(--text-faint); }
+
+.jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 500 10px/1 var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.jump select {
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  color: var(--text-muted);
+  font: 400 11px/1 var(--font-mono);
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.jump select:hover { border-color: var(--blue-ring); color: var(--text); }
+
+/* ── Table vide ────────────────────────────────────────────────────────── */
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.empty h2 {
+  font: 600 17px/1.3 var(--font);
+  color: var(--text);
+}
+
+.empty p {
+  font: 400 13px/1.6 var(--font);
+  color: var(--text-muted);
+}
+
+.empty ol {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding-left: 20px;
+  list-style: decimal;
+}
+
+.empty li {
+  font: 400 12.5px/1.6 var(--font);
+  color: var(--text-muted);
+}
+
+.empty code {
+  display: inline-block;
+  margin: 0 3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font: 400 11.5px/1.5 var(--font-mono);
+  color: var(--blue);
+}
+
+.empty strong { color: var(--text); font-weight: 600; }
+.empty em     { color: var(--text); font-style: normal; }
+
+.emptyNote {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px !important;
+  color: var(--text-dim) !important;
+}

@@ -63,6 +63,23 @@ const CASES = [
   { nom: 'spread 4 pts',           exit: { slMarginPts: 2, tpPts: 200 }, spread: 4 },
   { nom: 'spread 4 pts + BE coupe', exit: { slMarginPts: 2, tpPts: 200, beTouchTrigger: 2 }, spread: 4 },
   { nom: 'spread 12 pts + tout',   exit: { slMarginPts: 2, tpPts: 200, slCapPts: 100, beTriggerPts: 60, beSwingBars: 2 }, spread: 12 },
+  // Le dû : l'objectif de remboursement remplace le TP, l'ardoise se remplit et
+  // se vide au fil des positions. Les deux modes, avec spread (une perte se juge
+  // au NET), en chevauchement (l'anti-anticipation décide de ce qui est déjà
+  // connu) comme en trade unique, et croisé avec chaque type de BE — c'est là
+  // que se joue « le dû déplace la cible, pas la protection ».
+  { nom: 'dû 3 full',              exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 3 } },
+  { nom: 'dû 3 step',              exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 3, dueMode: 'step' } },
+  { nom: 'dû 8 full + spread',     exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 8 }, spread: 4 },
+  { nom: 'dû 5 + BE profit',       exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 5, beTriggerPts: 80 } },
+  { nom: 'dû 5 + BE durée',        exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 5, beBarsTrigger: 5 } },
+  { nom: 'dû 5 + BE retours',      exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 5, beTouchTrigger: 2 } },
+  { nom: 'dû 5 + BE swing',        exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 5, beSwingBars: 2 } },
+  { nom: 'dû 4 + les quatre BE',   exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 4, beTriggerPts: 60, beBarsTrigger: 8, beTouchTrigger: 3, beSwingBars: 2 } },
+  { nom: 'dû 4 step + SL plafonné',exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 4, dueMode: 'step', slCapPts: 80 } },
+  { nom: 'dû 4 + trade unique',    exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 4, uniqueTrade: true } },
+  { nom: 'dû 4 + unique + repos',  exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 4, uniqueTrade: true, skipAfterTp: 2 } },
+  { nom: 'dû 4 + repos, chevauché',exit: { slMarginPts: 2, tpPts: 200, dueAfterSl: 4, skipAfterTp: 2 }, spread: 2 },
 ];
 
 // Champs comparés : tout ce qui décrit le sort d'une position. `beTime` en fait
@@ -70,7 +87,10 @@ const CASES = [
 const FIELDS = ['id', 'direction', 'label', 'entryTime', 'entryPrice', 'exitTime', 'exitPrice',
   'sl', 'sl0', 'slCapped', 'tp', 'risk0', 'profitPoints', 'status', 'barsHeld', 'entryTouches',
   'maxPullupPts', 'maxDrawdownPts', 'maeArmedPts', 'beActivated', 'beReason', 'beTime',
-  'cutAtEntry', 'spreadPts', 'netPoints'];
+  'cutAtEntry', 'spreadPts', 'netPoints',
+  // Le dû : ce que la position a visé et ce qu'elle devait. Deux ardoises qui
+  // divergeraient d'une position rendraient tous les objectifs suivants faux.
+  'duePts', 'dueTotalPts', 'dueCount'];
 
 // Deux flottants issus de deux chemins de calcul peuvent différer du dernier
 // bit. On compare donc à 1e-9 près, pas à l'identique binaire.
@@ -109,7 +129,13 @@ for (const kase of CASES) {
     }
   }
 
+  // Compteurs de lot : ils se calculent en dehors des positions (signaux sautés,
+  // ardoise restante), donc une divergence n'y apparaîtrait nulle part ailleurs.
   const meta = sim.meta;
+  for (const m of ['skippedByCooldown', 'skippedWon', 'dueArmed', 'dueRemainingPts', 'dueRemainingSl']) {
+    if (!same(meta[m], legacy.meta[m])) diffs.push(`méta ${m} : ${meta[m]} ≠ ${legacy.meta[m]}`);
+  }
+
   if (diffs.length) {
     failed++;
     console.log(`✖ ${kase.nom}  (${A.length} positions)`);

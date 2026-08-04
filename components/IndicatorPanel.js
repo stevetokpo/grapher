@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import styles from './IndicatorPanel.module.css';
+import { RANGE_DEFAULTS, rangeLabel } from '../lib/periodZones';
 
 export const MA_COLORS = [
   '#60A5FA', '#F59E0B', '#A78BFA', '#F472B6',
@@ -33,6 +34,7 @@ const INDICATOR_TYPES = [
   { type: 'RSI',   label: 'RSI',   desc: 'Force relative',  color: '#F472B6', pane: 'sous-graphe' },
   { type: 'EQ',    label: 'EQ',    desc: 'Point d\'équilibre', color: '#A78BFA', pane: 'overlay'  },
   { type: 'TRENDER', label: 'TRENDER', desc: 'Harmonie multi-HTF', color: '#34D399', pane: 'overlay' },
+  { type: 'RANGE', label: 'RANGE', desc: 'Zones par période', color: '#60A5FA', pane: 'overlay' },
 ];
 
 // Unités de temps supérieures (notation MT5), pour les 3 HTF de biais.
@@ -62,6 +64,9 @@ const DEFAULT_FORM = {
   bgTransp: 80, showBg: true, showMark: true, showConf: true, showSlLn: true,
   bullColor: '#26A69A', bearColor: '#EF5350', slColor: '#EF5350',
   showBbCur: true, bbCurLen: 50, bbCurMult: 0.369, bbCurColor: '#60A5FA',
+  // RANGE — les défauts vivent avec le calcul (lib/periodZones.js), pas ici :
+  // ajouter un réglage à l'indicateur ne demande alors qu'un champ de formulaire.
+  ...RANGE_DEFAULTS,
 };
 
 function NumInput({ value, min, max, step = 1, onChange }) {
@@ -117,6 +122,14 @@ function indParams(ind) {
     ].filter(Boolean).join(' · ');
     return htf || 'aucun HTF';
   }
+  if (ind.type === 'RANGE') {
+    return [
+      ind.basis === 'body' ? 'corps' : 'mèches',
+      ind.extend === 'cover' && 'prolongée',
+      ind.frameSkip !== false && 'esquive encadrée',
+      ind.periodMode === 'plage' ? 'chaque jour' : (ind.resetDaily !== false ? `dès ${ind.anchorHour ?? 0} h` : 'continu'),
+    ].filter(Boolean).join(' · ');
+  }
   return SOURCES.find(s => s.value === ind.source)?.label ?? ind.source;
 }
 
@@ -124,6 +137,7 @@ function indPeriodLabel(ind) {
   if (ind.type === 'SWING')   return `${ind.leftBars ?? 5}/${ind.rightBars ?? 5}`;
   if (ind.type === 'EQ')      return String(ind.lookback ?? 60);
   if (ind.type === 'TRENDER') return `BB ${ind.bbLen ?? 50}`;
+  if (ind.type === 'RANGE')   return rangeLabel(ind);
   return String(ind.period ?? '—');
 }
 
@@ -168,6 +182,13 @@ export default function IndicatorPanel({ indicators, onChange, onClose }) {
       // Sans aucun HTF actif il n'y a pas d'harmonie à mesurer.
       if (!form.useHtf1 && !form.useHtf2 && !form.useHtf3) return;
       if ((form.bbLen ?? 50) < 1) return;
+    } else if (selected === 'RANGE') {
+      if (form.periodMode === 'plage') {
+        // Une plage de durée nulle ne marquerait jamais rien.
+        const from = (form.fromHour ?? 0) * 60 + (form.fromMin ?? 0);
+        const to   = (form.toHour   ?? 0) * 60 + (form.toMin   ?? 0);
+        if (from === to) return;
+      } else if ((form.markLen ?? 4) < 1) return;
     } else if (form.period < 2 || form.period > 500) return;
 
     if (editingId) {
@@ -649,6 +670,200 @@ export default function IndicatorPanel({ indicators, onChange, onClose }) {
                     <Swatches value={form.bbCurColor ?? '#60A5FA'} onChange={c => setF({ bbCurColor: c })} />
                   </div>
                 </div>
+              </>
+            )}
+
+            {/* RANGE fields */}
+            {selected === 'RANGE' && (
+              <>
+                <p className={styles.hint}>
+                  Marque, période par période, l’<strong>intervalle de prix</strong> parcouru :
+                  une boîte du plus bas au plus haut de la fenêtre. En mode <em>cycle</em>, on
+                  marque pendant une durée puis on <strong>esquive</strong> la suivante, en boucle
+                  ; en mode <em>plage</em>, on ne marque qu’une tranche horaire par jour. Les
+                  heures sont celles du graphe (UTC serveur), et la zone en cours reste en
+                  pointillés tant que sa fenêtre n’est pas finie.
+                </p>
+
+                <div className={styles.field}>
+                  <span className={styles.label}>Découpage</span>
+                  <div className={styles.segmented}>
+                    {[['cycle', 'Cycle marquage / esquive'], ['plage', 'Plage horaire du jour']].map(([v, l]) => (
+                      <button key={v}
+                        className={`${styles.segBtn}${(form.periodMode ?? 'cycle') === v ? ` ${styles.segBtnActive}` : ''}`}
+                        onClick={() => setF({ periodMode: v })}
+                      >{l}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Cycle : on marque X, on esquive Y */}
+                {(form.periodMode ?? 'cycle') === 'cycle' && (
+                  <div className={styles.markerGroup}>
+                    <span className={styles.markerGroupLabel} style={{ color: form.color }}>
+                      Cycle
+                    </span>
+                    <div className={styles.fieldRow}>
+                      <div className={styles.field}>
+                        <span className={styles.label}>Marquage</span>
+                        <NumInput value={form.markLen ?? 4} min={1} max={999} onChange={v => setF({ markLen: v })} />
+                      </div>
+                      <div className={styles.field}>
+                        <span className={styles.label}>Esquive</span>
+                        <NumInput value={form.skipLen ?? 4} min={0} max={999} onChange={v => setF({ skipLen: v })} />
+                      </div>
+                    </div>
+                    <div className={styles.fieldRow}>
+                      <div className={styles.field}>
+                        <span className={styles.label}>Unité</span>
+                        <select className={styles.sourceSelect} value={form.stepUnit ?? 'h'}
+                          onChange={e => setF({ stepUnit: e.target.value })}>
+                          <option value="h">heures</option>
+                          <option value="m">minutes</option>
+                        </select>
+                      </div>
+                      <div className={styles.field}>
+                        <span className={styles.label}>Ancrage (heure)</span>
+                        <NumInput value={form.anchorHour ?? 0} min={0} max={23} onChange={v => setF({ anchorHour: v })} />
+                      </div>
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Recaler le cycle chaque jour</span>
+                      <button
+                        className={`${styles.toggleBtn}${form.resetDaily !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                        onClick={() => setF({ resetDaily: form.resetDaily === false })}
+                      >{form.resetDaily !== false ? 'Activé' : 'Désactivé'}</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Plage : une tranche horaire par jour */}
+                {form.periodMode === 'plage' && (
+                  <div className={styles.markerGroup}>
+                    <span className={styles.markerGroupLabel} style={{ color: form.color }}>
+                      Plage horaire — une par jour, minuit franchissable (22:00 → 03:00)
+                    </span>
+                    <div className={styles.fieldRow}>
+                      <div className={styles.field}>
+                        <span className={styles.label}>De — heure</span>
+                        <NumInput value={form.fromHour ?? 18} min={0} max={23} onChange={v => setF({ fromHour: v })} />
+                      </div>
+                      <div className={styles.field}>
+                        <span className={styles.label}>De — minute</span>
+                        <NumInput value={form.fromMin ?? 0} min={0} max={59} onChange={v => setF({ fromMin: v })} />
+                      </div>
+                    </div>
+                    <div className={styles.fieldRow}>
+                      <div className={styles.field}>
+                        <span className={styles.label}>À — heure</span>
+                        <NumInput value={form.toHour ?? 23} min={0} max={23} onChange={v => setF({ toHour: v })} />
+                      </div>
+                      <div className={styles.field}>
+                        <span className={styles.label}>À — minute</span>
+                        <NumInput value={form.toMin ?? 0} min={0} max={59} onChange={v => setF({ toMin: v })} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Intervalle mesuré sur</span>
+                    <div className={styles.segmented}>
+                      {[['wick', 'Mèches'], ['body', 'Corps']].map(([v, l]) => (
+                        <button key={v}
+                          className={`${styles.segBtn}${(form.basis ?? 'wick') === v ? ` ${styles.segBtnActive}` : ''}`}
+                          onClick={() => setF({ basis: v })}
+                        >{l}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Prolonger sur l’esquive</span>
+                    <button
+                      className={`${styles.toggleBtn}${form.extend === 'cover' ? ` ${styles.toggleBtnOn}` : ''}`}
+                      onClick={() => setF({ extend: form.extend === 'cover' ? 'none' : 'cover' })}
+                    >{form.extend === 'cover' ? 'Activé' : 'Désactivé'}</button>
+                  </div>
+                </div>
+
+                {/* Le créneau esquivé, encadré à son tour — sa propre boîte, sa
+                    propre couleur, et un interrupteur pour n'en rien voir. */}
+                <div className={styles.markerGroup}>
+                  <span className={styles.markerGroupLabel} style={{ color: form.skipColor ?? '#94A3B8' }}>
+                    Créneau esquivé
+                  </span>
+                  <div className={styles.fieldRow}>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Encadrer l’esquive</span>
+                      <button
+                        className={`${styles.toggleBtn}${form.frameSkip !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                        onClick={() => setF({ frameSkip: form.frameSkip === false })}
+                      >{form.frameSkip !== false ? 'Activé' : 'Désactivé'}</button>
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Couleur du cadre</span>
+                      <Swatches
+                        value={form.skipColor ?? '#94A3B8'}
+                        onChange={c => setF({ skipColor: c })}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Ligne médiane</span>
+                    <button
+                      className={`${styles.toggleBtn}${form.showMid !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                      onClick={() => setF({ showMid: form.showMid === false })}
+                    >{form.showMid !== false ? 'Activée' : 'Désactivée'}</button>
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Étiquette horaire</span>
+                    <button
+                      className={`${styles.toggleBtn}${form.showLabel !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                      onClick={() => setF({ showLabel: form.showLabel === false })}
+                    >{form.showLabel !== false ? 'Activée' : 'Désactivée'}</button>
+                  </div>
+                </div>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Remplissage (%)</span>
+                    <NumInput value={form.zoneOpacity ?? 12} min={0} max={100} onChange={v => setF({ zoneOpacity: v })} />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Zones affichées (max)</span>
+                    <NumInput value={form.maxZones ?? 200} min={1} max={2000} onChange={v => setF({ maxZones: v })} />
+                  </div>
+                </div>
+
+                <div className={styles.field}>
+                  <span className={styles.label}>Couleur selon le sens de la fenêtre</span>
+                  <button
+                    className={`${styles.toggleBtn}${form.dirColor === true ? ` ${styles.toggleBtnOn}` : ''}`}
+                    onClick={() => setF({ dirColor: form.dirColor !== true })}
+                  >{form.dirColor === true ? 'Activée' : 'Désactivée'}</button>
+                </div>
+
+                {form.dirColor === true ? (
+                  <div className={styles.fieldRow}>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Fenêtre haussière</span>
+                      <Swatches value={form.bullColor ?? '#26A69A'} onChange={c => setF({ bullColor: c })} />
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Fenêtre baissière</span>
+                      <Swatches value={form.bearColor ?? '#EF5350'} onChange={c => setF({ bearColor: c })} />
+                    </div>
+                  </div>
+                ) : (
+                  <div className={styles.field}>
+                    <span className={styles.label}>Couleur</span>
+                    <Swatches value={form.color} onChange={c => setF({ color: c })} />
+                  </div>
+                )}
               </>
             )}
 

@@ -1,0 +1,336 @@
+.results {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-2);
+}
+
+/* ── Le chiffre ──────────────────────────────────────────────────── */
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  background: rgba(9, 12, 22, 0.60);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.heroLabel {
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.heroValue {
+  font-size: 30px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+.heroSub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.ruin {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--bear);
+  font-weight: 600;
+}
+
+.pos { color: var(--bull); }
+.neg { color: var(--bear); }
+.warn { color: var(--amber); }
+
+/* ── Courbe d'équité ─────────────────────────────────────────────── */
+.chartWrap {
+  position: relative;
+  margin-top: 10px;
+  padding: 10px 12px 6px;
+  background: rgba(9, 12, 22, 0.45);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.chartHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.chartTitle {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.chartScale {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-ghost);
+}
+.chart { display: block; cursor: crosshair; }
+.axisText  { font-size: 9px; font-family: var(--font-mono); fill: var(--text-ghost); }
+.axisValue { font-size: 10px; font-family: var(--font-mono); font-weight: 700; }
+
+.tip {
+  position: absolute;
+  top: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  background: rgba(9, 12, 22, 0.96);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r);
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+  white-space: nowrap;
+}
+.tipTime { font-size: 9.5px; color: var(--text-dim);   font-family: var(--font-mono); }
+.tipVal  { font-size: 11px;  color: var(--text);       font-family: var(--font-mono); font-weight: 700; }
+.tipSub  { font-size: 10px;  color: var(--text-muted); font-family: var(--font-mono); }
+
+/* ── Événements de compte ────────────────────────────────────────── */
+.flags {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+.flag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  background: rgba(9, 12, 22, 0.55);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text-dim);
+  min-width: 0;
+}
+.flagIcon {
+  width: 15px; height: 15px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: 9px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.flagCount {
+  font-size: 13px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+}
+.flagLabel {
+  font-size: 9.5px;
+  line-height: 1.15;
+  color: var(--text-dim);
+  overflow: hidden;
+}
+.flagOn.warn { color: var(--amber); border-color: var(--amber-ring); background: var(--amber-bg); }
+.flagOn.bad  { color: var(--bear);  border-color: var(--bear-ring);  background: var(--bear-bg); }
+.flagOn.mute { color: var(--text-muted); border-color: var(--border-2); }
+.flagOn .flagLabel { color: inherit; }
+
+/* ── Grille de chiffres ──────────────────────────────────────────── */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin-top: 10px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 9px;
+  background: rgba(13, 18, 32, 0.85);
+  min-width: 0;
+}
+.kpiLabel {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kpiValue {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.period {
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+/* ── Onglets ─────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+.spacer { flex: 1; }
+.tab {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--font);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--ease), background var(--ease), border-color var(--ease);
+}
+.tab:hover { color: var(--text-muted); }
+.tabActive {
+  color: var(--amber);
+  background: var(--amber-bg);
+  border-color: var(--amber-ring);
+}
+.dlBtn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: color var(--ease), border-color var(--ease);
+}
+.dlBtn:hover { color: var(--blue); border-color: var(--blue-ring); }
+
+.chartBtn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--ease), border-color var(--ease), background var(--ease);
+}
+.chartBtn:hover { color: var(--text-muted); border-color: var(--border-2); }
+.chartBtnOn {
+  color: var(--bull);
+  background: var(--bull-bg);
+  border-color: var(--bull-ring);
+}
+
+/* ── Tableau des trades ──────────────────────────────────────────── */
+.tableWrap {
+  margin-top: 8px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  scrollbar-width: thin;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+.table thead th {
+  position: sticky;
+  top: 0;
+  background: rgba(9, 12, 22, 0.97);
+  padding: 6px 4px;
+  text-align: left;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.table tbody td {
+  padding: 5px 4px;
+  border-bottom: 1px solid rgba(26, 37, 64, 0.45);
+  white-space: nowrap;
+}
+.table tbody tr:hover td { background: rgba(255,255,255,0.025); }
+.rowClickable { cursor: pointer; }
+.rowSelected td {
+  background: rgba(245, 158, 11, 0.10) !important;
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+.num { text-align: right; }
+.dim { color: var(--text-muted); }
+
+.moreBtn {
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text-dim);
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: color var(--ease), border-color var(--ease);
+}
+.moreBtn:hover { color: var(--text-muted); border-color: var(--border-2); }
+
+.empty {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  padding: 14px;
+}
+
+/* ── Journal ─────────────────────────────────────────────────────── */
+.log {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  scrollbar-width: thin;
+}
+.logLine {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  border-bottom: 1px solid rgba(26, 37, 64, 0.45);
+}
+.logTime  { color: var(--text-ghost); flex-shrink: 0; }
+.logText  { color: var(--text-muted); }
+.log_marginCall .logText { color: var(--amber); }
+.log_stopOut    .logText { color: var(--bear); }
+.log_ruin       .logText { color: var(--bear); font-weight: 700; }
+.log_rejected   .logText { color: var(--text-dim); }

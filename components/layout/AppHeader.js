@@ -3,11 +3,12 @@ import styles from './AppHeader.module.css';
 
 export default function AppHeader({
   symbols, symbolId, onSymbolChange,
-  onImport, onManage, onSettings, onReplay, onRsi, onChat, onBacktest, onAlerts, onRfvg, onKo,
+  onImport, onManage, onSettings, onReplay, onRsi, onChat, onBacktest, onAlerts, onRfvg, onKo, onTicker,
   isReplayMode = false,
   replaySymbolName = '',
   isRsiMode = false,
   isBacktestMode = false,
+  isTickerMode = false,
   onBack,
 }) {
   return (
@@ -41,7 +42,7 @@ export default function AppHeader({
 
       <div className={styles.spacer} />
 
-      {isReplayMode || isRsiMode || isBacktestMode ? (
+      {isReplayMode || isRsiMode || isBacktestMode || isTickerMode ? (
         <button className={styles.backBtn} onClick={onBack} aria-label="Retour au graphique">
           ← Retour
         </button>
@@ -90,6 +91,14 @@ export default function AppHeader({
               KO
             </button>
           )}
+          {onTicker && (
+            <button className={styles.tickerBtn} onClick={onTicker} aria-label="Vue au tick">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ marginRight: 5 }}>
+                <path d="M2 16h4v-5h4v8h4v-6h4v3h4" />
+              </svg>
+              Ticker
+            </button>
+          )}
           {onChat && (
             <button className={styles.aiBtn} onClick={onChat} aria-label="Assistant IA">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ marginRight: 5 }}>
@@ -134,6 +143,11 @@ export default function AppHeader({
         <div className={styles.backtestBadge} aria-label="Mode Backtest actif">
           <span className={styles.backtestDot} aria-hidden="true"/>
           <span className={styles.backtestLabel}>BACKTEST</span>
+        </div>
+      ) : isTickerMode ? (
+        <div className={styles.tickerBadge} aria-label="Mode Ticker actif">
+          <span className={styles.tickerDot} aria-hidden="true"/>
+          <span className={styles.tickerLabel}>TICKER</span>
         </div>
       ) : (
         <div className={styles.live} aria-label="Live data">

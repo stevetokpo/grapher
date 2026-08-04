@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import { groupCandles } from '../lib/candleData';
+import { TF_SECONDS }   from '../lib/replayUtils';
 import dynamic from 'next/dynamic';
 import { useSymbols }     from '../hooks/useSymbols';
 import { useBars }        from '../hooks/useBars';
@@ -15,6 +16,7 @@ import TimeframeBar     from '../components/layout/TimeframeBar';
 import styles           from '../styles/app.module.css';
 import { DEFAULT_SETTINGS } from '../components/SettingsPanel';
 import { DEFAULT_PATTERNS, PATTERN_TYPES } from '../components/PatternPanel';
+import { DEFAULT_SCRIPT_CONFIG } from '../components/ScriptPanel';
 
 const DrawingToolbar  = dynamic(() => import('../components/charts/DrawingToolbar'),  { ssr: false });
 const DrawingStyleBar = dynamic(() => import('../components/charts/DrawingStyleBar'), { ssr: false });
@@ -27,6 +29,7 @@ const IndicatorPanel = dynamic(() => import('../components/IndicatorPanel'),    
 const SettingsPanel  = dynamic(() => import('../components/SettingsPanel'),           { ssr: false });
 const ReplayModal    = dynamic(() => import('../components/replay/ReplayModal'),      { ssr: false });
 const PatternPanel   = dynamic(() => import('../components/PatternPanel'),             { ssr: false });
+const ScriptPanel    = dynamic(() => import('../components/ScriptPanel'),              { ssr: false });
 const ChatPanel      = dynamic(() => import('../components/chat/ChatPanel'),           { ssr: false });
 const AlertsPanel    = dynamic(() => import('../components/AlertsPanel'),              { ssr: false });
 
@@ -39,10 +42,17 @@ export default function Home() {
   const [indicators,      setIndicators]      = useLocalStorage('grapher.indicators', []);
   const [patterns,        setPatterns]        = useLocalStorage('grapher.patterns',   DEFAULT_PATTERNS);
   const [settings,        setSettings]        = useLocalStorage('grapher.settings',   DEFAULT_SETTINGS);
+  const [scriptConfig,    setScriptConfig]    = useLocalStorage('grapher.scripts',    DEFAULT_SCRIPT_CONFIG);
   const [showImport,      setShowImport]      = useState(false);
   const [showManage,      setShowManage]      = useState(false);
   const [showIndicators,  setShowIndicators]  = useState(false);
   const [showPatterns,    setShowPatterns]    = useState(false);
+  const [showScripts,     setShowScripts]     = useState(false);
+  // Positions du dernier run de script. Tenues ICI et non dans le tiroir : on
+  // referme le tiroir justement pour les regarder sur le graphe.
+  const [scriptTrades,    setScriptTrades]    = useState([]);
+  const [scriptTradeId,   setScriptTradeId]   = useState(null);
+  const [scriptFocus,     setScriptFocus]     = useState(null);
   const [showSettings,    setShowSettings]    = useState(false);
   const [showReplay,      setShowReplay]      = useState(false);
   const [showChat,        setShowChat]        = useState(false);
@@ -81,9 +91,10 @@ export default function Home() {
 
   const cvdData = useCVD(inFootprint ? null : symbolId, tfId);
 
-  // Séries HTF pour l'indicateur TRENDER — chargées indépendamment des bougies
-  // du graphe, qui n'en contiennent jamais assez (cf. hooks/useHtfBars).
-  const htfBars = useHtfBars(symbolId, indicators, displayBars);
+  // Séries HTF pour l'indicateur TRENDER et le motif RSIER — chargées
+  // indépendamment des bougies du graphe, qui n'en contiennent jamais assez
+  // (cf. hooks/useHtfBars).
+  const htfBars = useHtfBars(symbolId, indicators, effectivePatterns, displayBars);
 
   // Footprint data — only fetched when footprint mode is active for a symbol with ticks
   const {
@@ -95,6 +106,24 @@ export default function Home() {
   useEffect(() => {
     if (chartMode === 'footprint' && !hasTicks) setChartMode('candle');
   }, [hasTicks, chartMode]);
+
+  // Les positions d'un script appartiennent aux bougies sur lesquelles il a
+  // tourné. Changer de symbole ou d'unité de temps les rend caduques : les
+  // laisser peindrait des trades d'un marché sur les bougies d'un autre.
+  useEffect(() => {
+    setScriptTrades([]);
+    setScriptTradeId(null);
+    setScriptFocus(null);
+  }, [symbolId, tfId]);
+
+  // Recadrer sur une position choisie dans le tableau. Objet neuf à chaque fois :
+  // TradingChart compare `focusRange` par identité, donc re-cliquer la même
+  // ligne recadre quand même.
+  const focusScriptTrade = (t) => {
+    setScriptTradeId(t.id);
+    const pad = (TF_SECONDS[tfId] ?? 3600) * 12;
+    setScriptFocus({ from: t.entryTime - pad, to: t.exitTime + pad });
+  };
 
   const onImported = (data) => {
     setShowImport(false);
@@ -140,6 +169,7 @@ export default function Home() {
         onSettings={() => setShowSettings(true)}
         onReplay={() => setShowReplay(true)}
         onRsi={() => router.push('/rsi')}
+        onTicker={() => router.push('/ticker')}
         onBacktest={() => router.push('/backtest')}
         onRfvg={() => router.push('/rfvg')}
         onKo={() => router.push('/ko')}
@@ -158,6 +188,8 @@ export default function Home() {
         onIndicators={() => setShowIndicators(true)}
         patternCount={effectivePatterns.filter(p => p.enabled).length}
         onPatterns={() => setShowPatterns(true)}
+        onScripts={() => setShowScripts(v => !v)}
+        scriptsOpen={showScripts}
       />
 
       {/* ── Chart area ───────────────────────────────────────────── */}
@@ -197,6 +229,9 @@ export default function Home() {
                 patterns={effectivePatterns}
                 chartMode={chartMode}
                 settings={settings}
+                backtestTrades={scriptTrades}
+                selectedTradeId={scriptTradeId}
+                focusRange={scriptFocus}
                 watermarkText={currentSym ? `${currentSym.name} · ${tfId.toUpperCase()}` : ''}
                 cvdData={chartMode === 'candle' ? cvdData : null}
                 drawings={drawings}
@@ -220,6 +255,20 @@ export default function Home() {
       {showManage      && <ManagePanel    onClose={() => setShowManage(false)}     onDeleted={onDeleted} />}
       {showIndicators  && <IndicatorPanel onClose={() => setShowIndicators(false)} indicators={indicators} onChange={setIndicators} />}
       {showPatterns    && <PatternPanel   onClose={() => setShowPatterns(false)}   patterns={patterns}     onChange={setPatterns} />}
+      {showScripts     && (
+        <ScriptPanel
+          onClose={() => setShowScripts(false)}
+          candles={displayBars}
+          symbolName={currentSym?.name ?? ''}
+          tfId={tfId}
+          patterns={effectivePatterns}
+          config={scriptConfig}
+          onChange={setScriptConfig}
+          onTradesChange={setScriptTrades}
+          onSelectTrade={focusScriptTrade}
+          selectedTradeId={scriptTradeId}
+        />
+      )}
       {showSettings    && <SettingsPanel  onClose={() => setShowSettings(false)}   settings={settings}     onChange={setSettings} />}
       {showReplay      && <ReplayModal    onClose={() => setShowReplay(false)} />}
       {showChat        && <ChatPanel      onClose={() => setShowChat(false)} />}

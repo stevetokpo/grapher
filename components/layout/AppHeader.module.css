@@ -312,6 +312,31 @@
 }
 .koBtn:active { transform: scale(0.97); }
 
+/* ── Ticker (vue au tick) ─────────────────────────────────────── */
+.tickerBtn {
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+  background: rgba(52, 211, 153, 0.08);
+  color: #34D399;
+  box-shadow: var(--inset-hi);
+  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+.tickerBtn:hover {
+  background: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.65);
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.25), var(--inset-hi);
+}
+.tickerBtn:active { transform: scale(0.97); }
+
 /* ── Alertes ──────────────────────────────────────────────────── */
 .alertsBtn {
   display: flex;
@@ -417,6 +442,37 @@
   font-weight: 700;
   letter-spacing: 0.14em;
   color: #F472B6;
+  opacity: 0.70;
+}
+
+/* ── Badge ticker (remplace LIVE sur /ticker) ─────────────────── */
+.tickerBadge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.tickerDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34D399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.70);
+  animation: ticker-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes ticker-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.40; }
+}
+
+.tickerLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #34D399;
   opacity: 0.70;
 }
 

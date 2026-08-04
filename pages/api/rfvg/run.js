@@ -78,6 +78,11 @@ export default async function handler(req, res) {
         ambiguousExits: all.ambiguous ?? 0,
         skippedByCooldown: all.skippedByCooldown ?? 0,
         skippedWon: all.skippedWon ?? 0,
+        // Le dû : positions parties rembourser l'ardoise, et ce qui restait
+        // dessus au bord des données (sur TOUT l'historique, pas la fenêtre).
+        dueArmed:        all.dueArmed ?? 0,
+        dueRemainingPts: all.dueRemainingPts ?? 0,
+        dueRemainingSl:  all.dueRemainingSl ?? 0,
         dataFrom: candles.length ? candles[0].time : null,
         dataTo:   candles.length ? candles[candles.length - 1].time : null,
         ms: Date.now() - t0,

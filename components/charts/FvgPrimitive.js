@@ -14,8 +14,16 @@
 //
 // Any gap family sharing the FVG zone shape ({ side, state, top, bottom,
 // startTime, endTime }) can reuse it — the rFVG does, via labelText.
+//
+// A zone may also carry an optional price level ({ swingTime, swingPrice }),
+// drawn as an opaque WHITE line inside the box, from that bar to the box's
+// right edge — a price to wait for, not another edge of the box, so it never
+// takes the zone's colour. The xFVG uses it for the swing an "extra" pattern
+// came back to; families that leave the field out draw exactly what they drew
+// before.
 
-const GREY = '#64748B'; // mitigated / consumed gaps
+const GREY  = '#64748B'; // mitigated / consumed gaps
+const LEVEL = '#FFFFFF'; // optional price level inside a zone — opaque white, on purpose
 
 function hexToRgba(hex, alpha) {
   const h = hex.replace('#', '');
@@ -77,6 +85,25 @@ class FvgRenderer {
         ctx.stroke();
         ctx.setLineDash([]);
 
+        // Le niveau, quand la zone en porte un : un trait plein, du pivot
+        // jusqu'au bord droit de la boîte. Il part donc à gauche de la zone —
+        // c'est justement ce qu'on veut voir, la structure d'avant que la zone
+        // est venue reprendre.
+        if (r.level) {
+          const ly = Math.round(r.level.y * vr) + 0.5;
+          if (ly > yTop && ly < yBottom) {
+            // BLANC PLEIN, et pas la couleur de la zone : c'est un prix à
+            // attendre, pas un bord de boîte. Il doit se détacher du remplissage
+            // comme des bordures, quelle que soit la couleur du motif.
+            ctx.strokeStyle = LEVEL;
+            ctx.lineWidth = Math.max(1, Math.round(vr));
+            ctx.beginPath();
+            ctx.moveTo(Math.round(r.level.x * hr), ly);
+            ctx.lineTo(x2, ly);
+            ctx.stroke();
+          }
+        }
+
         if (data.showLabel && r.label && h > 14 * vr) {
           ctx.fillStyle = hexToRgba(r.color, Math.min(1, baseAlpha + 0.6));
           ctx.font = `${Math.round(10 * vr)}px Inter, system-ui, sans-serif`;
@@ -114,12 +141,25 @@ class FvgPaneView {
       const x2 = extendRight ? null : ts.timeToCoordinate(z.endTime);
       if (!extendRight && x2 == null) continue;
 
+      // Niveau optionnel tracé DANS la boîte, depuis la bougie qui l'a posé
+      // jusqu'au bord droit de la zone. Le xFVG « extra » s'en sert pour montrer
+      // le swing que l'impulsion a cassé et sur lequel la zone retombe. Une
+      // famille qui ne pose pas swingPrice ne dessine rien de plus : le champ
+      // est absent chez elle, et la boîte reste ce qu'elle était.
+      let level = null;
+      if (z.swingPrice != null && z.swingTime != null) {
+        const lx = ts.timeToCoordinate(z.swingTime);
+        const ly = series.priceToCoordinate(z.swingPrice);
+        if (lx != null && ly != null) level = { x: lx, y: ly };
+      }
+
       rects.push({
         x1, x2, extendRight,
         yTop, yBottom,
         color: zoneColor(z, opts),
         state: z.state,
         label: zoneLabel(z, opts),
+        level,
       });
     }
 

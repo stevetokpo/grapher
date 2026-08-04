@@ -86,10 +86,11 @@ convention a tranché — c'est la mesure de ce qu'elle coûte. Sur XAUUSD 5m à
 pts : 1 position sur 141. Sur un TP serré ou un TF haut, ce sera davantage.
 
 **Parité garantie par un test, pas par la relecture.** `scripts/rfvg-parity.mjs`
-rejoue 19 configurations (chaque branche de la machine à états : les quatre
-break-even, leurs cumuls, le trade unique, le cooldown, les trois modes de
-détection) et compare position par position `simulatePositions(fills:'bar')` à
-`calcRFVGPositions`. Vérifié identique sur XAUUSD 5m et Volatility 75 15m. Le
+rejoue 40 configurations (chaque branche de la machine à états : les quatre
+break-even, leurs cumuls, le trade unique, le cooldown, le SL plafonné, le dû
+sous ses deux modes, les trois modes de détection) et compare position par
+position `simulatePositions(fills:'bar')` à `calcRFVGPositions`, compteurs de lot
+compris. Vérifié identique sur XAUUSD 5m et Volatility 75 15m. Le
 jour où les deux divergeront, on le saura par ce script — pas six semaines plus
 tard, par un écart de résultats inexpliqué.
 
@@ -134,6 +135,42 @@ l'entrée et atteint le TP part au TP. Conséquence sur les statistiques : ces
 positions quittent la population TP/SL, donc le winrate et les deux études du bas
 de page ne portent plus que sur celles qui sont allées au bout. **Absent de l'EA
 MT5** lui aussi.
+
+`dueAfterSl` / `dueMode` — **le dû : rembourser avant de gagner**. Toute position
+clôturée dans le rouge laisse sa perte **nette** sur une ardoise ; tout gain la
+rembourse en commençant par la plus **ancienne**, et ce qu'il ne couvre pas
+entièrement reste dû à hauteur du reliquat. Dès que l'ardoise compte
+`dueAfterSl` pertes, la position suivante vise le **remboursement** au lieu de son
+vrai TP — même s'il tombe plus **près** que son objectif normal, parce que
+rembourser passe avant. `dueMode: 'full'` vise l'ardoise entière (elle s'éloigne à
+mesure qu'elle grossit, et un objectif hors d'atteinte ne rembourse rien) ;
+`'step'` vise un bond de `dueAfterSl` × la perte moyenne encore due, soit la
+taille exacte de ce qui a armé le dû — on rembourse alors en plusieurs fois,
+chacune atteignable. L'arithmétique vit dans `lib/dueLedger.js`, partagée mot pour
+mot avec la famille liq / rev / Twins Bars : « seuil 8 » veut dire la même chose
+d'un motif à l'autre.
+
+Quatre propriétés à garder en tête pour l'interpréter :
+
+- **« Perte » se juge au net, pas au statut.** Une sortie au break-even qui finit
+  sous zéro (le spread) compte dans le seuil comme un SL.
+- **Avec un spread, rembourser ne solde jamais tout à fait** : le gain qui atteint
+  le dû paie lui aussi son aller-retour, et il reste exactement un spread sur
+  l'ardoise. C'est honnête — cet argent-là n'a pas été récupéré.
+- **Anti-anticipation.** Une sortie ne pèse sur le dû d'une entrée que si elle a eu
+  lieu avant la bougie de cette entrée. Sans `uniqueTrade` les positions se
+  chevauchent, donc le dû lu peut être plus petit que l'ardoise réelle au même
+  instant : c'est le prix de ne pas remonter le temps.
+- **Le break-even n'est pas touché.** Ses quatre déclencheurs s'arment aux mêmes
+  distances que sur une position ordinaire, et en unité `pct` le seuil et le
+  niveau restent un pourcentage du **TP normal**, jamais de l'objectif de
+  remboursement. Sinon une longue série de pertes désarmerait le break-even au
+  moment précis où il sert le plus. Le dû déplace la cible, pas la protection.
+
+`dueArmed`, `dueRemainingPts` et `dueRemainingSl` (méta de chaque run) disent
+combien de positions sont parties rembourser et ce qui restait sur l'ardoise au
+bord des données — un reste qui ne descend jamais dit que le seuil est trop haut,
+ou que le motif ne rembourse pas. **Absent de l'EA MT5**.
 
 `maxBars` — plafond de durée de vie. Sans lui, une position qui n'atteint ni son
 stop ni son TP reste ouverte jusqu'au bord des données (statut `open`) et ne

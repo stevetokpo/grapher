@@ -5,10 +5,43 @@ import { calcMA, calcRSI, calcBB, calcSwings } from '../../lib/indicators';
 import { calcEquilibrium } from '../../lib/equilibrium';
 import { calcHarmony } from '../../lib/harmony';
 import { createHarmonyPrimitive } from './HarmonyPrimitive';
-import { calcTwinsBars, calcFVG, calcRFVG, calcRFVGPositions, calcKO, calcKOPositions, calcHBHBHB, calcCompression, calcHBHB, calcHMBM, calcHMBMPositions } from '../../lib/patterns';
+import { calcRangeZones } from '../../lib/periodZones';
+import { createRangeZonePrimitive } from './RangeZonePrimitive';
+import { calcFVG, calcRFVG, calcRFVGPositions, calcKO, calcKOPositions, calcHBHBHB, calcCompression, calcHBHB, calcHMBM, calcHMBMPositions } from '../../lib/patterns';
+import { calcTwinsBars } from '../../lib/twins/detect';
+import { calcTwinsPositions } from '../../lib/twins/positions';
+import {
+  detectOptions   as twinsDetectOptions,
+  positionOptions as twinsPositionOptions,
+} from '../../lib/twins/params';
 import { calcXFVG } from '../../lib/xfvg/detect';
 import { detectOptions as xfvgDetectOptions, styleOptions as xfvgStyleOptions } from '../../lib/xfvg/params';
+import { calcXfvgExtra } from '../../lib/xfvgx/detect';
+import { calcXfvgxPositions } from '../../lib/xfvgx/positions';
+import {
+  detectOptions   as xfvgxDetectOptions,
+  positionOptions as xfvgxPositionOptions,
+  styleOptions    as xfvgxStyleOptions,
+} from '../../lib/xfvgx/params';
 import { calcLiq } from '../../lib/liq/detect';
+import { calcRingble } from '../../lib/ringble/detect';
+import { detectOptions as ringbleOptions } from '../../lib/ringble/params';
+import { calcSuperAval } from '../../lib/superAval/detect';
+import { detectOptions as superAvalOptions } from '../../lib/superAval/params';
+import { calcRsier } from '../../lib/rsier/detect';
+import { calcRsierPositions } from '../../lib/rsier/positions';
+import {
+  detectOptions   as rsierDetectOptions,
+  positionOptions as rsierPositionOptions,
+  styleOptions    as rsierStyleOptions,
+} from '../../lib/rsier/params';
+import { calcTrenderZones } from '../../lib/trender/detect';
+import { calcTrenderPositions } from '../../lib/trender/positions';
+import {
+  detectOptions   as trenderDetectOptions,
+  positionOptions as trenderPositionOptions,
+  styleOptions    as trenderStyleOptions,
+} from '../../lib/trender/params';
 import { calcRev } from '../../lib/rev/detect';
 import { calcRevPositions } from '../../lib/rev/positions';
 import {
@@ -37,6 +70,14 @@ import TradeSetup    from '../replay/TradeSetup';
 import styles from './TradingChart.module.css';
 
 const PREFETCH_THRESHOLD = 50;
+
+// Étiquette portée par le repère des motifs à MARQUEUR (ceux qui ne dessinent pas
+// de zone). Un motif absent d'ici ne perd que son texte, pas son repère.
+const MARKER_TEXT = {
+  TWINS_BARS: 'TB',
+  RINGBLE:    'RB',
+  SUPER_AVAL: 'SA',
+};
 
 // Bottom oscillator pane sizing (fraction of total chart height). Shared by any
 // 0-100 indicator that asks for it — RSI, and the EQ balance score.
@@ -203,10 +244,14 @@ function ReportButton({ nom, couleur, bord, onClick, right }) {
   );
 }
 
-function PatternMonitor({ nom, couleur, stats, rr, top }) {
+// `rr` — l'objectif, tel qu'il a été RÉGLÉ. Un motif dont le TP se règle en
+// points n'en vise aucun : il passe alors le RR MÉDIAN réalisé et lève
+// `rrMedian`, pour que la parenthèse ne fasse pas passer une conséquence pour
+// une cible. `null` = rien à dire, la parenthèse disparaît.
+function PatternMonitor({ nom, couleur, stats, rr, rrMedian = false, top }) {
   const { total, tp, sl, be = 0, open, expPts, beThresh, profitFactor,
             skippedByUnique = 0, skippedByCooldown = 0, skippedWon = 0,
-            missed = 0 } = stats;
+            missed = 0, dueArmed = 0, dueRemainingPts = 0, dueRemainingSl = 0 } = stats;
     const resolved = tp + sl;
     const wr       = resolved > 0 ? tp / resolved : null;
     const wrColor  = wr == null || beThresh == null ? '#94A3B8' : wr >= beThresh ? '#26A69A' : '#EF5350';
@@ -252,9 +297,11 @@ function PatternMonitor({ nom, couleur, stats, rr, top }) {
           <span style={key}>Winrate</span>
           <span style={{ color: wrColor, fontWeight: 700 }}>
             {wr == null ? '—' : `${(wr * 100).toFixed(1)} %`}
-            <span style={{ color: 'rgba(148,163,184,0.7)', fontWeight: 500 }}>
-              {' '}(RR {rr})
-            </span>
+            {rr != null && (
+              <span style={{ color: 'rgba(148,163,184,0.7)', fontWeight: 500 }}>
+                {' '}({rrMedian ? 'RR méd.' : 'RR'} {rr})
+              </span>
+            )}
           </span>
         </div>
         <div style={row}>
@@ -307,6 +354,23 @@ function PatternMonitor({ nom, couleur, stats, rr, top }) {
             </span>
           </div>
         )}
+        {/* Le dû — visible seulement quand il a servi. Deux chiffres : combien
+            de positions sont parties rembourser, et ce qui reste sur l'ardoise
+            au bord des données. Un reste qui ne descend jamais dit que le seuil
+            est trop haut ou que le motif ne rembourse pas. */}
+        {(dueArmed > 0 || dueRemainingSl > 0) && (
+          <div style={row}>
+            <span style={key}>Dû (armés · reste)</span>
+            <span style={{ fontWeight: 600 }}>
+              <span style={{ color: '#F59E0B' }}>{dueArmed}</span>
+              <span style={{ color: 'rgba(148,163,184,0.6)' }}> · </span>
+              <span style={{ color: dueRemainingSl > 0 ? '#EF5350' : '#26A69A' }}>
+                {dueRemainingPts.toFixed(1)} pts
+              </span>
+              <span style={{ color: 'rgba(148,163,184,0.7)', fontWeight: 500 }}> ({dueRemainingSl})</span>
+            </span>
+          </div>
+        )}
         {/* Un échantillon minuscule donne des pourcentages qui ont l'air
             d'un résultat sans en être un. Le moniteur le dit lui-même. */}
         {resolved > 0 && resolved < 30 && (
@@ -338,7 +402,10 @@ export default function TradingChart({
   onDrawingAdd, onDrawingUpdate, onDrawingRemove, onDrawingSelect,
   replayPlaying = false,
   openTrades = [],
-  backtestTrades = [],          // trades fermés d'un backtest — dessinés comme des positions
+  // Trades fermés — d'un backtest ou d'un SCRIPT (cf. lib/scripts/chartTrades.js,
+  // qui traduit les positions d'un script vers cette forme) — dessinés comme des
+  // positions : bande de risque, bande de gain, trajet parcouru.
+  backtestTrades = [],
   selectedTradeId = null,
   focusRange = null,            // { from, to } en temps — recadre le graphe (nouvel objet = nouveau recadrage)
   tradeSetupActive = false,
@@ -371,13 +438,29 @@ export default function TradingChart({
   const rsiSeriesMapRef     = useRef(new Map());
   const eqSeriesMapRef      = useRef(new Map());
   const trenderMapRef       = useRef(new Map());
+  const rangeMapRef         = useRef(new Map());
   const patternSeriesMapRef = useRef(new Map());
   const fvgPrimitiveRef         = useRef(null);
   const xfvgPrimitiveRef        = useRef(null);
+  const xfvgxPrimitiveRef       = useRef(null);
+  const xfvgxPosPrimitiveRef    = useRef(null);
+  // RSIER : la bande verticale (même primitive que les zones d'harmonie du
+  // TRENDER) et la série fantôme qui porte le triangle de début de zone.
+  const rsierPrimitiveRef       = useRef(null);
+  const rsierMarksRef           = useRef(null);
+  const rsierPosPrimitiveRef    = useRef(null);
+  // Motif TRENDER : les mêmes trois pièces que le RSIER — la bande (primitive
+  // d'harmonie), la série fantôme des triangles, et les trades.
+  const harmoPrimitiveRef       = useRef(null);
+  const harmoMarksRef           = useRef(null);
+  const harmoPosPrimitiveRef    = useRef(null);
   const liqPrimitiveRef         = useRef(null);
   const liqPosPrimitiveRef      = useRef(null);
   const revPrimitiveRef         = useRef(null);
   const revPosPrimitiveRef      = useRef(null);
+  // Twins Bars n'a pas de primitive de NIVEAU : son repère reste la flèche, et
+  // seules ses positions sont dessinées.
+  const twinsPosPrimitiveRef    = useRef(null);
   const rfvgPrimitiveRef        = useRef(null);
   const rfvgPosPrimitiveRef     = useRef(null);
   const koPrimitiveRef          = useRef(null);
@@ -414,6 +497,12 @@ export default function TradingChart({
   // TRENDER : l'HTF le plus lent manque d'historique dans la fenêtre chargée.
   // Sans ça l'indicateur reste muet et l'utilisateur croit à un bug.
   const [trenderWarmup, setTrenderWarmup] = useState(null);
+  // RSIER : même piège, même message — le HTF choisi n'a pas assez de bougies
+  // pour que son RSI existe, et sans ça le motif reste muet.
+  const [rsierWarmup, setRsierWarmup] = useState(null);
+  // Motif TRENDER : le même piège encore, et pour cause — c'est le même calcul
+  // que l'indicateur. Le message est séparé pour dire lequel des deux se tait.
+  const [harmoWarmup, setHarmoWarmup] = useState(null);
 
   // ── Screenshot → presse-papier ────────────────────────────────────────────
   const [shotState, setShotState] = useState(null); // null | 'copied' | 'error'
@@ -423,12 +512,20 @@ export default function TradingChart({
   // Positions de la pince liq : stats du moniteur et rapport téléchargeable.
   const [liqStats, setLiqStats] = useState(null);
   const [revStats, setRevStats] = useState(null);
+  const [twinsStats, setTwinsStats] = useState(null);
+  const [xfvgxStats, setXfvgxStats] = useState(null);
+  const [rsierStats, setRsierStats] = useState(null);
+  const [harmoStats, setHarmoStats] = useState(null);
   // Rapport rFVG : mêmes positions que le dessin et le moniteur, gardées pour
   // le téléchargement JSON. Ref et non state : rien à re-rendre, le clic lit
   // simplement la dernière valeur — donc toujours à jour au dernier chargement.
   const rfvgReportRef = useRef(null);
   const liqReportRef  = useRef(null);
   const revReportRef  = useRef(null);
+  const twinsReportRef = useRef(null);
+  const xfvgxReportRef = useRef(null);
+  const rsierReportRef = useRef(null);
+  const harmoReportRef = useRef(null);
   // Moniteur / rapport KO (mode « position »), même logique que le rFVG — à ceci
   // près que les statistiques viennent de lib/signals/stats.js, la MÊME fonction
   // que la page /ko et l'optimiseur : le moniteur du graphe et le rapport de la
@@ -621,13 +718,23 @@ export default function TradingChart({
       rsiSeriesMapRef.current.clear();
       eqSeriesMapRef.current.clear();
       trenderMapRef.current.clear();
+      rangeMapRef.current.clear();
       patternSeriesMapRef.current.clear();
       fvgPrimitiveRef.current  = null;
       xfvgPrimitiveRef.current = null;
+      xfvgxPrimitiveRef.current    = null;
+      xfvgxPosPrimitiveRef.current = null;
+      rsierPrimitiveRef.current = null;
+      rsierMarksRef.current     = null;
+      rsierPosPrimitiveRef.current = null;
+      harmoPrimitiveRef.current    = null;
+      harmoMarksRef.current        = null;
+      harmoPosPrimitiveRef.current = null;
       liqPrimitiveRef.current  = null;
       liqPosPrimitiveRef.current = null;
       revPrimitiveRef.current    = null;
       revPosPrimitiveRef.current = null;
+      twinsPosPrimitiveRef.current = null;
       rfvgPrimitiveRef.current = null;
       rfvgPosPrimitiveRef.current = null;
       koPrimitiveRef.current   = null;
@@ -1336,6 +1443,48 @@ export default function TradingChart({
     setTrenderWarmup(trInds.length ? warn : null);
   }, [candles, indicators, htfBars]);
 
+  // ── RANGE — l'intervalle d'une période ────────────────────────────────────
+  // Une primitive par indicateur : le découpage du temps (cycle marquage/esquive
+  // ou plage horaire) est fait dans lib/periodZones.js, ici on ne fait que
+  // créer, mettre à jour et détacher.
+  useEffect(() => {
+    const chart  = chartRef.current;
+    const series = candleSeriesRef.current;
+    if (!chart || !series) return;
+
+    const rgInds = indicators.filter(i => i.type === 'RANGE');
+    const map    = rangeMapRef.current;
+    const active = new Set(rgInds.map(i => i.id));
+
+    for (const [id, prim] of map) {
+      if (!active.has(id)) {
+        try { series.detachPrimitive(prim); } catch {}
+        map.delete(id);
+      }
+    }
+
+    for (const ind of rgInds) {
+      if (!map.has(ind.id)) {
+        const prim = createRangeZonePrimitive();
+        series.attachPrimitive(prim);
+        map.set(ind.id, prim);
+      }
+      const prim = map.get(ind.id);
+
+      const { zones } = candles?.length ? calcRangeZones(candles, ind) : { zones: [] };
+      prim.update(zones, {
+        color:     ind.color     ?? '#60A5FA',
+        bullColor: ind.bullColor ?? theme.candle.bull,
+        bearColor: ind.bearColor ?? theme.candle.bear,
+        skipColor: ind.skipColor ?? '#94A3B8',
+        dirColor:  ind.dirColor === true,
+        opacity:   Math.max(0, Math.min(100, ind.zoneOpacity ?? 12)) / 100,
+        showMid:   ind.showMid   !== false,
+        showLabel: ind.showLabel !== false,
+      });
+    }
+  }, [candles, indicators, theme]);
+
   // ── Pattern markers ───────────────────────────────────────────────────────
   useEffect(() => {
     const chart = chartRef.current;
@@ -1343,7 +1492,16 @@ export default function TradingChart({
 
     // Zone patterns (FVG, rFVG, HBH/BHB, HBHB/BHBH, COMPRESSION) draw rectangles
     // through their own primitive effects below — only marker patterns land here.
-    const active = patterns.filter(p => p.enabled && p.render !== 'zone');
+    //
+    // Twins Bars a en plus une représentation « Position » : ses flèches se
+    // taisent alors, et l'effet dédié plus bas dessine les trades à leur place.
+    // Le filtre est ici et pas dans l'effet des positions parce que c'est la
+    // même liste qui décide de créer ou de retirer les séries de marqueurs — un
+    // motif absent d'`active` voit les siennes supprimées, ce qui est
+    // exactement ce qu'on veut.
+    const active = patterns.filter(p =>
+      p.enabled && p.render !== 'zone'
+      && !(p.type === 'TWINS_BARS' && (p.display ?? 'both') === 'position'));
     const map    = patternSeriesMapRef.current;
     const activeTypes = new Set(active.map(p => p.type));
 
@@ -1379,12 +1537,20 @@ export default function TradingChart({
 
       let detected = [];
       if (pat.type === 'TWINS_BARS') {
-        detected = calcTwinsBars(candles, {
-          direction:       pat.direction       ?? 'both',
-          atrPeriod:       pat.atrPeriod       ?? 7,
-          atrMult:         pat.atrMult         ?? 1.6,
-          similarityRatio: pat.similarityRatio ?? 0.7,
-        });
+        // Les options ne sont pas recopiées champ par champ : elles sortent de
+        // lib/twins/params.js, qui sépare ce qui crée un motif de ce qui le
+        // colorie. Ajouter une condition ne touche donc pas ce fichier.
+        detected = calcTwinsBars(candles, twinsDetectOptions(pat));
+      } else if (pat.type === 'RINGBLE') {
+        // Les options ne sont pas recopiées champ par champ : elles sortent de
+        // lib/ringble/params.js, qui sépare ce qui crée un motif de ce qui le
+        // colorie. Ajouter une condition au ringble ne touche donc pas ce fichier.
+        detected = calcRingble(candles, ringbleOptions(pat));
+      } else if (pat.type === 'SUPER_AVAL') {
+        // Même contrat : les options sortent de lib/superAval/params.js, pas
+        // d'une recopie champ par champ. Ajouter une condition au motif ne
+        // touche donc pas ce fichier.
+        detected = calcSuperAval(candles, superAvalOptions(pat));
       }
 
       const bulls     = detected.filter(d => d.side === 'bull');
@@ -1392,7 +1558,7 @@ export default function TradingChart({
       const bullColor = pat.bullColor  ?? '#26A69A';
       const bearColor = pat.bearColor  ?? '#EF5350';
       const size      = pat.markerSize ?? 1;
-      const label     = pat.showLabel !== false ? 'TB' : '';
+      const label     = pat.showLabel !== false ? (MARKER_TEXT[pat.type] ?? '') : '';
 
       bullSeries.setData(bulls);
       bullSeries.setMarkers(bulls.map(({ time }) => ({
@@ -1476,6 +1642,392 @@ export default function TradingChart({
       xfvgStyleOptions(xfvg),
     );
   }, [candles, patterns]);
+
+  // ── xFVG+ : les extras, et leurs positions ─────────────────────────────────
+  // MÊME détecteur que l'effet ci-dessus — calcXFVG, avec `swing` forcé sur
+  // 'extra' (lib/xfvgx/detect.js) : les deux patterns dessinent donc la même
+  // boîte quand ils sont réglés pareil, et c'est le signe que rien n'a divergé.
+  // Ce qui est propre à celui-ci vient après la zone : un ORDRE EN ATTENTE sur le
+  // trait blanc du swing (± une marge en points), SL et TP fixes en points. Le
+  // câblage est celui de la famille — primitive de trades, moniteur, rapport.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const xfvgx = patterns.find(p => p.type === 'XFVGX' && p.enabled);
+
+    const dropZones = () => {
+      if (xfvgxPrimitiveRef.current) {
+        try { series.detachPrimitive(xfvgxPrimitiveRef.current); } catch {}
+        xfvgxPrimitiveRef.current = null;
+      }
+    };
+    const dropPositions = () => {
+      if (xfvgxPosPrimitiveRef.current) {
+        try { series.detachPrimitive(xfvgxPosPrimitiveRef.current); } catch {}
+        xfvgxPosPrimitiveRef.current = null;
+      }
+    };
+
+    if (!xfvgx || !candles?.length) {
+      dropZones(); dropPositions();
+      setXfvgxStats(null); xfvgxReportRef.current = null;
+      return;
+    }
+
+    const display = xfvgx.display ?? 'both';
+
+    if (display === 'position') {
+      dropZones();
+    } else {
+      if (!xfvgxPrimitiveRef.current) {
+        xfvgxPrimitiveRef.current = createFvgPrimitive();
+        series.attachPrimitive(xfvgxPrimitiveRef.current);
+      }
+      xfvgxPrimitiveRef.current.update(
+        calcXfvgExtra(candles, xfvgxDetectOptions(xfvgx)),
+        xfvgxStyleOptions(xfvgx),
+      );
+    }
+
+    if (display === 'zone') {
+      dropPositions();
+      setXfvgxStats(null);
+      xfvgxReportRef.current = null;
+      return;
+    }
+
+    if (!xfvgxPosPrimitiveRef.current) {
+      xfvgxPosPrimitiveRef.current = createTradesPrimitive();
+      series.attachPrimitive(xfvgxPosPrimitiveRef.current);
+    }
+    const posOpts   = xfvgxPositionOptions(xfvgx);
+    const positions = calcXfvgxPositions(candles, posOpts);
+    // Les signaux jamais remplis restent dans `positions` — le rapport et les
+    // statistiques les comptent — mais il n'y a rien à en dessiner : ni entrée,
+    // ni sortie, ni prix. L'ordre en attente rend le cas COURANT ici, plus que
+    // sur tout autre motif de la famille.
+    xfvgxPosPrimitiveRef.current.update(positions.filter(p => p.status !== 'missed'), null);
+
+    // Le TP est toujours réglé en points sur ce motif : l'objectif est constant,
+    // on le donne aux statistiques plutôt que de leur faire deviner une médiane.
+    const stats = computeStats(positions, { tpPts: posOpts.tpPts });
+    setXfvgxStats({
+      ...stats,
+      skippedByUnique:   positions.skippedByUnique ?? 0,
+      skippedByCooldown: positions.skippedByCooldown ?? 0,
+      skippedWon:        positions.skippedWon ?? 0,
+      dueArmed:          positions.dueArmed ?? 0,
+      dueRemainingPts:   positions.dueRemainingPts ?? 0,
+      dueRemainingSl:    positions.dueRemainingSl ?? 0,
+    });
+    xfvgxReportRef.current = {
+      params: posOpts,
+      stats,
+      positions,
+      // Combien de motifs la détection a trouvés en tout : sans ce compte, le
+      // rapport aurait moins de positions que de zones sans dire pourquoi.
+      extraStats: { zonesTotal: positions.zonesTotal ?? null },
+    };
+  }, [candles, patterns]);
+
+  // ── RSIER : surzones du RSI d'un HTF ───────────────────────────────────────
+  // Le motif ne dessine pas une boîte de PRIX mais une bande de TEMPS : le RSI
+  // d'une unité supérieure dit « ici, le marché est en surachat », ce qui ne
+  // désigne aucun niveau. D'où la primitive du TRENDER (fond pleine hauteur) et
+  // non celle des FVG — le trait « ≈ SL » y reste éteint, faute de niveau à
+  // tracer. Le triangle de début de zone passe par une série fantôme, comme
+  // l'harmonie et les swings.
+  //
+  // `htfBars` porte la série HTF servie par /api/htf (cf. hooks/useHtfBars) :
+  // sans elle le RSI n'aurait que ce que le graphe a chargé, très loin du compte
+  // dès que le HTF est long. Le motif s'affiche quand même dans ce cas si
+  // l'historique suffit, et le bandeau de préchauffage explique le silence sinon.
+  useEffect(() => {
+    const chart  = chartRef.current;
+    const series = candleSeriesRef.current;
+    if (!chart || !series) return;
+
+    const rsier = patterns.find(p => p.type === 'RSIER' && p.enabled);
+
+    const dropZones = () => {
+      if (rsierPrimitiveRef.current) {
+        try { series.detachPrimitive(rsierPrimitiveRef.current); } catch {}
+        rsierPrimitiveRef.current = null;
+      }
+      if (rsierMarksRef.current) {
+        chart.removeSeries(rsierMarksRef.current);
+        rsierMarksRef.current = null;
+      }
+    };
+
+    // En représentation « Position », la bande et son triangle se taisent : les
+    // trades de l'effet suivant les remplacent. Le bandeau de préchauffage, lui,
+    // ne dépend pas de la représentation — sans RSI il n'y a ni zone ni position.
+    if (!rsier || !candles?.length || (rsier.display ?? 'both') === 'position') {
+      dropZones();
+      if (!rsier || !candles?.length) { setRsierWarmup(null); return; }
+      const { warmup } = calcRsier(candles, rsierDetectOptions(rsier), htfBars);
+      setRsierWarmup(warmup?.ok === false ? warmup : null);
+      return;
+    }
+
+    if (!rsierPrimitiveRef.current) {
+      rsierPrimitiveRef.current = createHarmonyPrimitive();
+      series.attachPrimitive(rsierPrimitiveRef.current);
+    }
+    if (!rsierMarksRef.current) {
+      rsierMarksRef.current = chart.addLineSeries({
+        color: 'rgba(0,0,0,0)', lineWidth: 0,
+        priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerVisible: false, title: '',
+      });
+    }
+
+    const { zones, warmup } = calcRsier(candles, rsierDetectOptions(rsier), htfBars);
+    const style = rsierStyleOptions(rsier);
+
+    rsierPrimitiveRef.current.update(zones, {
+      bullColor: style.bullColor,
+      bearColor: style.bearColor,
+      bgTransp:  style.bgTransp,
+      showBg:    style.showBg,
+      showSlLn:  false,
+    });
+
+    // Triangle sur la bougie qui OUVRE la zone — celle où le motif est connu.
+    // Le texte nomme le HTF lu et le RSI qui a ouvert la zone : sans lui, deux
+    // RSIER réglés sur des unités différentes seraient indiscernables à l'œil.
+    if (style.showMark) {
+      const marks = zones.map(z => ({
+        time:     z.startTime,
+        value:    z.side === 'bull' ? candles[z.startIdx].low : candles[z.startIdx].high,
+      }));
+      rsierMarksRef.current.setData(marks);
+      rsierMarksRef.current.setMarkers(zones.map(z => ({
+        time:     z.startTime,
+        position: z.side === 'bull' ? 'belowBar' : 'aboveBar',
+        color:    z.side === 'bull' ? style.bullColor : style.bearColor,
+        shape:    z.side === 'bull' ? 'arrowUp' : 'arrowDown',
+        text:     style.showLabel ? `${z.htfLabel} · ${Math.round(z.rsiStart)}` : '',
+        size:     1,
+      })));
+    } else {
+      rsierMarksRef.current.setData([]);
+      rsierMarksRef.current.setMarkers([]);
+    }
+
+    setRsierWarmup(warmup?.ok === false ? warmup : null);
+  }, [candles, patterns, htfBars]);
+
+  // ── RSIER : les positions ──────────────────────────────────────────────────
+  // Même famille que Twins Bars, liq et rev — même simulateur
+  // (lib/patternPositions.js), même moniteur, même rapport. Une position par
+  // ENTRÉE en surzone, au marché, à l'ouverture de la bougie qui ouvre la bande :
+  // le RSI HTF y est déjà connu, sa bougie s'étant clôturée avant. Le détail de
+  // ce qui est propre au motif (cet instant d'entrée, et le stop qui s'appuie sur
+  // les bougies PRÉCÉDENTES faute de structure) vit dans lib/rsier/positions.js.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const rsier = patterns.find(p => p.type === 'RSIER' && p.enabled);
+
+    const dropPositions = () => {
+      if (rsierPosPrimitiveRef.current) {
+        try { series.detachPrimitive(rsierPosPrimitiveRef.current); } catch {}
+        rsierPosPrimitiveRef.current = null;
+      }
+    };
+
+    // Éteint, sans bougies, ou en zone seule : rien à simuler, et le moniteur
+    // comme le bouton de rapport doivent disparaître avec.
+    if (!rsier || !candles?.length || (rsier.display ?? 'both') === 'zone') {
+      dropPositions();
+      setRsierStats(null); rsierReportRef.current = null;
+      return;
+    }
+
+    if (!rsierPosPrimitiveRef.current) {
+      rsierPosPrimitiveRef.current = createTradesPrimitive();
+      series.attachPrimitive(rsierPosPrimitiveRef.current);
+    }
+    const posOpts   = rsierPositionOptions(rsier);
+    const positions = calcRsierPositions(candles, posOpts, htfBars);
+    // L'entrée étant au marché, aucun signal n'est 'missed' — le filtre reste,
+    // pour que ce câblage se lise comme celui des trois autres motifs.
+    rsierPosPrimitiveRef.current.update(positions.filter(p => p.status !== 'missed'), null);
+
+    // TP réglé en points = objectif CONSTANT : on le donne aux statistiques, qui
+    // sinon le déduiraient de la médiane des distances observées. En RR, il varie
+    // d'une position à l'autre et n'a pas de valeur unique.
+    const stats = computeStats(positions, {
+      tpPts: posOpts.tpMode === 'points' ? posOpts.tpPts : 0,
+    });
+    setRsierStats({
+      ...stats,
+      skippedByUnique:   positions.skippedByUnique ?? 0,
+      skippedByCooldown: positions.skippedByCooldown ?? 0,
+      skippedWon:        positions.skippedWon ?? 0,
+      dueArmed:          positions.dueArmed ?? 0,
+      dueRemainingPts:   positions.dueRemainingPts ?? 0,
+      dueRemainingSl:    positions.dueRemainingSl ?? 0,
+    });
+    rsierReportRef.current = {
+      params: posOpts,
+      stats,
+      positions,
+      // Ce que la simulation n'a pas pu jouer : les zones ouvertes trop tôt dans
+      // les données pour ancrer un stop. Sans ce compte, le rapport aurait moins
+      // de positions que de zones sans jamais dire pourquoi.
+      extraStats: {
+        zonesTotal:       positions.zonesTotal ?? null,
+        skippedByHistory: positions.skippedByHistory ?? 0,
+      },
+    };
+  }, [candles, patterns, htfBars]);
+
+  // ── Motif TRENDER : les zones d'harmonie ───────────────────────────────────
+  // MÊME calcul que l'indicateur TRENDER plus haut — littéralement la même
+  // fonction (lib/harmony.js, appelée par lib/trender/detect.js) —, et même
+  // primitive pour le dessin. Ce qui change tient en deux points : le motif
+  // filtre les zones par sens, et il n'affiche pas les Bollinger du timeframe
+  // courant (seule leur BASE l'intéresse, et c'est le trait « ≈ SL »).
+  //
+  // Les deux peuvent être allumés en même temps et se superposeront exactement :
+  // c'est le signe que rien n'a divergé.
+  useEffect(() => {
+    const chart  = chartRef.current;
+    const series = candleSeriesRef.current;
+    if (!chart || !series) return;
+
+    const harmo = patterns.find(p => p.type === 'HARMONY' && p.enabled);
+
+    const dropZones = () => {
+      if (harmoPrimitiveRef.current) {
+        try { series.detachPrimitive(harmoPrimitiveRef.current); } catch {}
+        harmoPrimitiveRef.current = null;
+      }
+      if (harmoMarksRef.current) {
+        chart.removeSeries(harmoMarksRef.current);
+        harmoMarksRef.current = null;
+      }
+    };
+
+    if (!harmo || !candles?.length || (harmo.display ?? 'both') === 'position') {
+      dropZones();
+      if (!harmo || !candles?.length) { setHarmoWarmup(null); return; }
+      const { warmup } = calcTrenderZones(candles, trenderDetectOptions(harmo), htfBars);
+      setHarmoWarmup(warmup?.ok === false ? warmup : null);
+      return;
+    }
+
+    if (!harmoPrimitiveRef.current) {
+      harmoPrimitiveRef.current = createHarmonyPrimitive();
+      series.attachPrimitive(harmoPrimitiveRef.current);
+    }
+    if (!harmoMarksRef.current) {
+      harmoMarksRef.current = chart.addLineSeries({
+        color: 'rgba(0,0,0,0)', lineWidth: 0,
+        priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerVisible: false, title: '',
+      });
+    }
+
+    const { zones, warmup } = calcTrenderZones(candles, trenderDetectOptions(harmo), htfBars);
+    const style = trenderStyleOptions(harmo);
+
+    harmoPrimitiveRef.current.update(zones, {
+      bullColor: style.bullColor,
+      bearColor: style.bearColor,
+      slColor:   style.slColor,
+      bgTransp:  style.bgTransp,
+      showBg:    style.showBg,
+      showSlLn:  style.showSlLn,
+    });
+
+    // Triangle au début de chaque zone, texte = le ou les HTF confirmateurs —
+    // ceux qui ont basculé sur cette bougie et complété l'harmonie.
+    if (style.showMark) {
+      harmoMarksRef.current.setData(zones.map(z => ({
+        time:  z.startTime,
+        value: z.side === 'bull' ? candles[z.startIdx].low : candles[z.startIdx].high,
+      })));
+      harmoMarksRef.current.setMarkers(zones.map(z => ({
+        time:     z.startTime,
+        position: z.side === 'bull' ? 'belowBar' : 'aboveBar',
+        color:    z.side === 'bull' ? style.bullColor : style.bearColor,
+        shape:    z.side === 'bull' ? 'arrowUp' : 'arrowDown',
+        text:     style.showConf ? (z.confirm.join(' + ') || '—') : '',
+        size:     1,
+      })));
+    } else {
+      harmoMarksRef.current.setData([]);
+      harmoMarksRef.current.setMarkers([]);
+    }
+
+    setHarmoWarmup(warmup?.ok === false ? warmup : null);
+  }, [candles, patterns, htfBars]);
+
+  // ── Motif TRENDER : les positions ──────────────────────────────────────────
+  // Une position par OUVERTURE de zone, au marché, à l'ouverture de la bougie qui
+  // SUIT celle où la zone s'ouvre — le stop étant le trait « ≈ SL », qui contient
+  // la clôture de la bougie de détection. Le pourquoi vit dans
+  // lib/trender/positions.js ; la gestion, elle, est celle de toute la famille.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const harmo = patterns.find(p => p.type === 'HARMONY' && p.enabled);
+
+    const dropPositions = () => {
+      if (harmoPosPrimitiveRef.current) {
+        try { series.detachPrimitive(harmoPosPrimitiveRef.current); } catch {}
+        harmoPosPrimitiveRef.current = null;
+      }
+    };
+
+    if (!harmo || !candles?.length || (harmo.display ?? 'both') === 'zone') {
+      dropPositions();
+      setHarmoStats(null); harmoReportRef.current = null;
+      return;
+    }
+
+    if (!harmoPosPrimitiveRef.current) {
+      harmoPosPrimitiveRef.current = createTradesPrimitive();
+      series.attachPrimitive(harmoPosPrimitiveRef.current);
+    }
+    const posOpts   = trenderPositionOptions(harmo);
+    const positions = calcTrenderPositions(candles, posOpts, htfBars);
+    harmoPosPrimitiveRef.current.update(positions.filter(p => p.status !== 'missed'), null);
+
+    const stats = computeStats(positions, {
+      tpPts: posOpts.tpMode === 'points' ? posOpts.tpPts : 0,
+    });
+    setHarmoStats({
+      ...stats,
+      skippedByUnique:   positions.skippedByUnique ?? 0,
+      skippedByCooldown: positions.skippedByCooldown ?? 0,
+      skippedWon:        positions.skippedWon ?? 0,
+      dueArmed:          positions.dueArmed ?? 0,
+      dueRemainingPts:   positions.dueRemainingPts ?? 0,
+      dueRemainingSl:    positions.dueRemainingSl ?? 0,
+    });
+    harmoReportRef.current = {
+      params: posOpts,
+      stats,
+      positions,
+      // Combien de zones l'harmonie a produites, et combien n'étaient pas
+      // jouables — faute d'ATR (zone trop proche du début des données) ou de stop
+      // posable. Sans ces comptes, le rapport aurait moins de positions que de
+      // zones sans jamais dire pourquoi.
+      extraStats: {
+        zonesTotal:    positions.zonesTotal ?? null,
+        skippedByAtr:  positions.skippedByAtr ?? 0,
+        skippedByStop: positions.skippedByStop ?? 0,
+      },
+    };
+  }, [candles, patterns, htfBars]);
 
   // ── liq : la pince, motif autonome ─────────────────────────────────────────
   // Motif entièrement séparé du xFVG : ses réglages, ses couleurs, son
@@ -1625,14 +2177,69 @@ export default function TradingChart({
     revReportRef.current = { params: posOpts, stats, positions };
   }, [candles, patterns]);
 
+  // ── Twins Bars : les positions ─────────────────────────────────────────────
+  // Même famille que le liq et le rev — même simulateur, même rapport, même
+  // moniteur —, à une chose près : PAS de primitive de niveau. Le motif se
+  // repère à sa flèche, dessinée par l'effet des marqueurs plus haut ; il n'y a
+  // donc ici que les trades à attacher ou à retirer. L'entrée est au marché et
+  // rien d'autre : aucun signal 'missed' n'est possible, mais le filtre reste,
+  // pour que ce câblage se lise comme celui des deux autres.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const twins = patterns.find(p => p.type === 'TWINS_BARS' && p.enabled);
+
+    const dropPositions = () => {
+      if (twinsPosPrimitiveRef.current) {
+        try { series.detachPrimitive(twinsPosPrimitiveRef.current); } catch {}
+        twinsPosPrimitiveRef.current = null;
+      }
+    };
+
+    // Éteint, sans bougies, ou en repère seul : rien à simuler, et le moniteur
+    // comme le bouton de rapport doivent disparaître avec.
+    if (!twins || !candles?.length || (twins.display ?? 'both') === 'marker') {
+      dropPositions();
+      setTwinsStats(null); twinsReportRef.current = null;
+      return;
+    }
+
+    if (!twinsPosPrimitiveRef.current) {
+      twinsPosPrimitiveRef.current = createTradesPrimitive();
+      series.attachPrimitive(twinsPosPrimitiveRef.current);
+    }
+    const posOpts   = twinsPositionOptions(twins);
+    const positions = calcTwinsPositions(candles, posOpts);
+    twinsPosPrimitiveRef.current.update(positions.filter(p => p.status !== 'missed'), null);
+
+    // TP réglé en points = objectif CONSTANT : on le donne aux statistiques, qui
+    // sinon le déduiraient de la médiane des distances observées. En RR, il varie
+    // d'une position à l'autre et n'a pas de valeur unique — la médiane reste la
+    // seule réponse honnête.
+    const stats = computeStats(positions, {
+      tpPts: posOpts.tpMode === 'points' ? posOpts.tpPts : 0,
+    });
+    setTwinsStats({
+      ...stats,
+      skippedByUnique:   positions.skippedByUnique ?? 0,
+      skippedByCooldown: positions.skippedByCooldown ?? 0,
+      skippedWon:        positions.skippedWon ?? 0,
+      dueArmed:          positions.dueArmed ?? 0,
+      dueRemainingPts:   positions.dueRemainingPts ?? 0,
+      dueRemainingSl:    positions.dueRemainingSl ?? 0,
+    });
+    twinsReportRef.current = { params: posOpts, stats, positions };
+  }, [candles, patterns]);
+
   // Rapport JSON des positions liq — même forme que ceux du rFVG et du KO, donc
   // /rapports le lit sans rien savoir de ce motif.
   // Téléchargement des rapports de la famille (liq, rev) : la construction du
   // document est partagée (lib/patternReport.js), seul le titre change.
-  const downloadFamilyReport = useCallback((ref, titre, nom) => {
+  const downloadFamilyReport = useCallback((ref, titre, nom, conventions) => {
     const rep = ref.current;
     if (!rep) return;
-    const doc  = buildPatternReport({ titre, ...rep });
+    const doc  = buildPatternReport({ titre, ...rep, conventions });
     const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -1647,6 +2254,81 @@ export default function TradingChart({
     [downloadFamilyReport]);
   const downloadRevReport = useCallback(
     () => downloadFamilyReport(revReportRef, 'rev — positions simulées (pause puis deux impulsions opposées ; stop sur tout le motif, TP en RR)', 'rev'),
+    [downloadFamilyReport]);
+  // Twins Bars : mêmes conventions que la famille, SAUF celles qui décrivent
+  // l'ordre en attente au bord d'une bande. Ce motif n'en a pas — les laisser
+  // ferait décrire au rapport une mécanique que le motif n'a jamais eue.
+  const downloadTwinsReport = useCallback(
+    () => downloadFamilyReport(
+      twinsReportRef,
+      'Twins Bars — positions simulées (deux bougies opposées à corps plein ; entrée au marché, stop sur la paire, TP en RR ou en points)',
+      'twins-bars',
+      {
+        entree: "AU MARCHÉ, et rien d'autre : à l'ouverture de la bougie qui suit la seconde jumelle. Le motif n'est connu qu'à la clôture de celle-ci, c'est donc le premier prix disponible ensuite. Il n'existe pas de mode 'zone' pour ce motif — il désigne une bougie, pas une bande où poser un ordre en attente : une position est toujours prise, et entryMode est forcé à 'market' même si un réglage enregistré disait autre chose",
+        signauxRates: "aucun : l'entrée étant au marché, tout signal donne une position. Le statut 'missed' et le champ waitedBars n'apparaissent jamais dans ce rapport — ils restent dans la forme du document pour que les motifs de la famille se comparent champ à champ",
+        stop: "slMode = 'structure' : sous le PLUS BAS des DEUX bougies du motif, moins slMarginPts ; au-dessus du PLUS HAUT plus la marge en vente — le risque suit alors la taille de la paire et VARIE d'une position à l'autre. slMode = 'points' : à slPts de l'entrée, le risque devient CONSTANT et le seuil de rentabilité redevient 1/(1+RR). Dans les deux cas le stop est connu avant l'entrée, donc actif dès la bougie d'entrée",
+      },
+    ),
+    [downloadFamilyReport]);
+
+  // xFVG+ : mêmes conventions que la famille, sauf celles que ce motif prend
+  // autrement — l'entrée (un ordre sur un NIVEAU, pas au bord d'une bande), le
+  // stop et le TP (deux distances fixes en points). Les laisser telles quelles
+  // ferait décrire au rapport une mécanique que le motif n'a pas.
+  const downloadXfvgxReport = useCallback(
+    () => downloadFamilyReport(
+      xfvgxReportRef,
+      'xFVG+ — positions simulées (xFVG dont la zone contient le swing cassé ; ordre en attente sur ce trait, SL et TP fixes en points)',
+      'xfvg-extra',
+      {
+        detection: "le xFVG EXTRA, et lui seul : un xFVG dont la boîte contient le dernier swing d'EN FACE — swing HAUT pour un motif haussier, swing BAS pour un baissier —, celui-ci étant cherché hors du motif (on part de la bougie qui OUVRE la figure et on remonte) et seulement s'il était déjà CONFIRMÉ à la clôture du motif, sinon on lirait l'avenir. C'est le MÊME détecteur que le pattern xFVG (lib/xfvg/detect.js, calcXFVG) avec swing = 'extra' : les deux modes de figure ('x3', l'imbalance 3 bougies ; 'x2', le retournement contra-MM en 2 bougies) et tous leurs filtres s'appliquent ici à l'identique",
+        entree: "ORDRE EN ATTENTE SUR LE TRAIT, jamais au marché. Le niveau visé est le swing cassé ± entryMarginPts POINTS — marge SIGNÉE comptée par rapport au côté d'où le prix REVIENT : POSITIVE, l'ordre est EN DEÇÀ du trait (au-dessus pour un motif haussier, en dessous pour un baissier) et sera servi plus tôt, à un prix moins bon ; NÉGATIVE, il est AU-DELÀ et exige que le prix dépasse le trait. Le niveau est porté par le champ `level` de chaque position. L'ordre est armé à partir de la bougie qui SUIT la figure (le motif n'est connu qu'à la clôture de sa dernière bougie) et il faut que le prix soit HORS du niveau pour qu'il y « revienne » : s'il est du bon côté à la clôture du motif l'ordre est armé aussitôt, sinon on attend qu'il en sorte — c'est le côté de sortie qui fixe alors le sens d'approche. Remplissage au niveau exact, ou à l'ouverture de la bougie si elle a ouvert au-delà : un ordre réel aurait été servi mieux. Passé entryWaitBars bougies l'ordre est annulé (statut 'missed'). Techniquement, le simulateur joue ça comme une bande de HAUTEUR NULLE (top = bottom = le niveau) : un ordre au bord d'une bande sans hauteur EST un ordre au niveau",
+        signauxRates: "les 'missed' sont des signaux dont l'ordre n'a jamais été rempli, et ils sont COURANTS ici — c'est un motif où l'on attend un retour. Ils sont listés exprès, sans prix ni résultat, et n'entrent dans aucune statistique : les omettre donnerait un taux de réussite calculé sur les seuls trades que le marché a bien voulu servir. waitedBars dit, pour les autres, combien de bougies l'ordre a attendu. zonesTotal (dans stats) dit combien de motifs la détection a trouvés en tout — l'écart avec `total` tient aux figures trop près du bord des données pour qu'on ait une bougie où poser l'ordre",
+        stop: "slMode est figé sur 'points' : une DISTANCE FIXE de slPts depuis l'entrée, et rien d'autre. Le motif n'a pas de stop structurel qui lui soit propre — la boîte est déjà l'objet qu'on joue, s'en servir de stop attacherait le risque au hasard de la taille de l'impulsion. Le risque est donc CONSTANT d'une position à l'autre : points et R disent la même chose. Le stop est connu avant l'entrée, donc posé avec l'ordre et actif dès la bougie de remplissage",
+        tp: "tpMode est figé sur 'points' lui aussi : tpPts depuis l'entrée, INDÉPENDANT du stop. Aucun RR n'est visé — il est un rapport entre deux réglages fixes (tpPts ÷ slPts), et le seuil de rentabilité redevient le 1/(1+RR) des manuels. Le champ `rr` de chaque position vaut null, `tpPts` porte la distance réellement visée (celle du dû quand il a pris la place de l'objectif)",
+        breakEven: "inchangé et toujours en R — mais le risque étant constant ici (SL en points), 1 R vaut exactement slPts : le seuil et le blocage se lisent donc aussi bien dans l'une ou l'autre unité, contrairement aux motifs à stop structurel",
+      },
+    ),
+    [downloadFamilyReport]);
+
+  // RSIER : mêmes conventions que la famille, sauf les trois que ce motif prend
+  // autrement — l'entrée (au marché, à l'ouverture de la bougie qui ouvre la
+  // bande), les signaux ratés (aucun) et le stop (qui ne s'appuie sur aucune
+  // structure du motif, faute de structure). Les laisser telles quelles ferait
+  // décrire au rapport une mécanique que le motif n'a jamais eue.
+  const downloadRsierReport = useCallback(
+    () => downloadFamilyReport(
+      rsierReportRef,
+      'RSIER — positions simulées (surzone du RSI d’un HTF ; entrée au marché à l’ouverture de la zone, stop sur l’extrême précédent ou en points, TP en RR ou en points)',
+      'rsier',
+      {
+        entree: "AU MARCHÉ, et rien d'autre : à l'OUVERTURE de la bougie qui ouvre la zone — une position par ENTRÉE en surzone, pas une par bougie de zone. La bougie HTF qui a fait basculer le RSI s'est clôturée AVANT que cette bougie ne s'ouvre : son RSI est donc déjà connu à cet instant et rien n'est anticipé. Il n'existe pas de mode 'zone' pour ce motif — la bande est faite de TEMPS et non de prix, il n'y a aucun bord où poser un ordre en attente : entryMode est forcé à 'market' même si un réglage enregistré disait autre chose",
+        signauxRates: "aucun : l'entrée étant au marché, toute zone jouable donne une position. Le statut 'missed' et le champ waitedBars n'apparaissent jamais dans ce rapport — ils restent dans la forme du document pour que les motifs de la famille se comparent champ à champ. En revanche skippedByHistory compte les zones ÉCARTÉES : celles qui s'ouvrent avant qu'on dispose des slLookback bougies où ancrer le stop. zonesTotal dit combien de zones la détection a trouvé en tout",
+        stop: "le motif ne désigne AUCUNE structure de prix — seulement un instant. slMode = 'structure' : sous le plus BAS des slLookback bougies qui PRÉCÈDENT l'entrée (au-dessus du plus HAUT en vente), moins slMarginPts — le dernier extrême laissé par le marché avant qu'on entre ; le risque varie alors d'une position à l'autre. slMode = 'points' : à slPts de l'entrée, risque CONSTANT — le seul stop vraiment natif du motif. Dans les deux cas le stop est connu avant l'entrée, donc actif dès la bougie d'entrée",
+        sensJoue: "tradeSide = 'reversion' (défaut) : on ACHÈTE la survente et on VEND le surachat, le pari étant que l'excès se corrige. tradeSide = 'continuation' : exactement l'inverse, la surzone étant lue comme une tendance qui continue. Le sens de la ZONE ne change pas pour autant — une zone de survente reste une survente, même quand on la vend",
+        nonRepaint: "chaque bougie du graphe lit le RSI de la dernière bougie HTF CLÔTURÉE (équivalent de request.security(expr[1], lookahead_on) en Pine). Une zone n'ouvre donc jamais dans le bucket HTF où le RSI est entré en surzone, mais sur la PREMIÈRE bougie du bucket suivant : c'est le décalage qu'on paie pour que l'historique ne mente pas sur ce qu'on aurait vu en direct",
+      },
+    ),
+    [downloadFamilyReport]);
+
+  // Motif TRENDER : conventions d'entrée et de stop refaites, le reste étant
+  // celui de la famille.
+  const downloadHarmoReport = useCallback(
+    () => downloadFamilyReport(
+      harmoReportRef,
+      'TRENDER — positions simulées (harmonie multi-HTF ; entrée au marché à l’ouverture de la zone, SL et TP fixes et indépendants, en points ou en ATR)',
+      'trender',
+      {
+        detection: "IDENTIQUE À L'INDICATEUR TRENDER : c'est la même fonction qui calcule les deux (lib/harmony.js). Sur chacun des 3 HTF actifs, une Bollinger(bbLen, bbMult) sur les clôtures HTF donne un biais (+1 / −1 / 0) ; la zone s'ouvre quand TOUS les HTF actifs pointent dans le même sens et court tant qu'ils y restent. Le seul ajout du motif est le filtre `direction`, qui retient des zones sans en créer aucune",
+        entree: "AU MARCHÉ, à l'OUVERTURE de la bougie qui ouvre la zone — une position par OUVERTURE DE ZONE, pas une par bougie de zone. L'harmonie y est déjà connue (elle ne lit que des bougies HTF CLÔTURÉES, donc la valeur portée par cette bougie était figée avant même qu'elle ne s'ouvre) et l'ATR qui dimensionne les distances est lu sur la bougie PRÉCÉDENTE : rien de ce qui décide de la position ne vient de la bougie où l'on entre. Il n'existe pas de mode 'zone' : la bande est faite de TEMPS, il n'y a aucun bord de prix où attendre un retour",
+        signauxRates: "aucun : l'entrée étant au marché, toute zone jouable donne une position. Deux comptes disent ce qui a été ÉCARTÉ — skippedByAtr : zones ouvertes avant que l'ATR n'existe (ou sur la toute première bougie chargée, qui n'a pas de bougie précédente où le lire) ; skippedByStop : stop non posable, distance nulle ou du mauvais côté. zonesTotal dit combien de zones l'harmonie a produites en tout",
+        stop: "une DISTANCE FIXE depuis l'entrée, indépendante du TP. slMode = 'points' : slPts points, risque CONSTANT. slMode = 'atr' : slAtrMult × ATR(atrPeriod), l'ATR de Wilder étant lu sur la bougie qui PRÉCÈDE l'entrée — le risque suit alors la volatilité du moment et varie d'une position à l'autre. Le trait « ≈ SL » que l'indicateur dessine n'est PAS le stop : il est reporté dans le champ `level` de chaque position pour qu'on puisse le relire, et c'est tout. Le stop est connu avant l'entrée, donc actif dès la bougie d'entrée",
+        tp: "une DISTANCE FIXE depuis l'entrée, elle aussi, et réglée SÉPARÉMENT du stop : tpMode = 'points' (tpPts points) ou 'atr' (tpAtrMult × le MÊME ATR que le stop, lu au même endroit). Aucun RR n'est visé — il est un RÉSULTAT : le champ `rr` de chaque position vaut null, `tpPts` porte la distance réellement visée, et profitR donne le R réalisé. Le seuil de rentabilité affiché est donc celui qui a été RÉALISÉ, pas celui d'un objectif théorique",
+        sensJoue: "celui de la zone, et il n'y a rien à régler : une harmonie haussière s'achète, une baissière se vend. Le TRENDER est un indicateur de TENDANCE — le prendre à contre-pied serait un autre motif, pas un réglage",
+        nonRepaint: "chaque bougie du graphe lit le biais de la dernière bougie HTF CLÔTURÉE (équivalent de request.security(expr[1], lookahead_on) en Pine) : ce qui est affiché sur une bougie ne changera plus jamais. Le confirmateur (champ `confirm` de la zone) est le HTF qui a basculé sur la bougie d'ouverture — les autres étaient déjà alignés",
+        sortieDeZone: "AUCUNE : la position vit sa vie de SL / TP / BE et ne se referme pas quand l'harmonie se rompt. La fin de zone n'est donc pas une sortie, et une position peut survivre à la zone qui l'a ouverte",
+      },
+    ),
     [downloadFamilyReport]);
 
   // ── rFVG zones (même primitive que le FVG, autre détection) ────────────────
@@ -1679,9 +2361,13 @@ export default function TradingChart({
       mode:      rfvg.mode      ?? 'rfvg',
       direction: rfvg.direction ?? 'both',
       minPts:       rfvg.minPts       ?? 0,
+      maxPts:       rfvg.maxPts       ?? 0,   // hauteur max de la zone (0 = off)
       maPeriodFast: rfvg.maPeriodFast ?? 15,
       maPeriodSlow: rfvg.maPeriodSlow ?? 200,
       slowOpenOnly: rfvg.slowOpenOnly === true,
+      firstSlowSide: rfvg.firstSlowSide === true,
+      slowStraddle:  rfvg.slowStraddle  === true,
+      pairOpposite:  rfvg.pairOpposite  === true,
       atrPeriod: rfvg.atrPeriod ?? 14,
       atrMult:   rfvg.atrMult   ?? 1.5,
       atrMult3:  rfvg.atrMult3  ?? 0,
@@ -1730,6 +2416,9 @@ export default function TradingChart({
         beTriggerPts, beTouchTrigger, beBarsTrigger, beSwingBars, beLevelPts,
         uniqueTrade: rfvg.uniqueTrade === true,
         skipAfterTp: rfvg.skipAfterTp ?? 0,
+        // Le dû (lib/dueLedger.js) : 0 = éteint, le motif joue son vrai TP.
+        dueAfterSl:  rfvg.dueAfterSl ?? 0,
+        dueMode:     rfvg.dueMode    ?? 'full',
       };
       const positions = calcRFVGPositions(candles, posOpts);
       rfvgPosPrimitiveRef.current.update(positions, null);
@@ -1781,7 +2470,12 @@ export default function TradingChart({
                       // Signaux sautés par le cooldown (hors rapport, juste comptés)
                       // et combien auraient gagné.
                       skippedByCooldown: positions.skippedByCooldown ?? 0,
-                      skippedWon:        positions.skippedWon ?? 0 };
+                      skippedWon:        positions.skippedWon ?? 0,
+                      // Le dû : positions parties rembourser, et ce qui reste
+                      // sur l'ardoise au bord des données.
+                      dueArmed:          positions.dueArmed ?? 0,
+                      dueRemainingPts:   positions.dueRemainingPts ?? 0,
+                      dueRemainingSl:    positions.dueRemainingSl ?? 0 };
       setRfvgStats({ ...stats, beOn: beTriggerPts > 0 || beTouchTrigger > 0 || beBarsTrigger > 0 });
       rfvgReportRef.current = { params: posOpts, stats, positions };
     }
@@ -1829,6 +2523,11 @@ export default function TradingChart({
         // Cooldown : signaux sautés (hors rapport) et combien auraient gagné.
         skippedByCooldown: stats.skippedByCooldown ?? 0,
         skippedWon:        stats.skippedWon ?? 0,
+        // Le dû : combien de positions ont visé un remboursement plutôt que leur
+        // vrai TP, et ce qui reste sur l'ardoise au bord des données.
+        dueArmed:         stats.dueArmed ?? 0,
+        dueRemainingPts:  stats.dueRemainingPts != null ? +stats.dueRemainingPts.toFixed(4) : 0,
+        dueRemainingSl:   stats.dueRemainingSl ?? 0,
       },
       conventions: {
         unites:        "P&L en POINTS : le lot est fixe, c'est lui qui est proportionnel au gain réel — compter en R supposerait qu'on redimensionne la position à chaque trade pour risquer le même montant. Les champs en R restent fournis à titre indicatif (points / risk0), le risque variant d'une position à l'autre",
@@ -1845,6 +2544,7 @@ export default function TradingChart({
         maxDrawdownPts:'MAE — plus forte avancée contre la position, bougie de sortie incluse (pessimiste), plafonnée à risk0',
         maeArmedPts:   "la même MAE, restreinte à la fenêtre où un stop STRUCTUREL existe (B5 → sortie) ; c'est elle qui doit servir à étudier un stop resserré, la chaleur prise pendant B4 ne pouvant déclencher aucun stop ; null si la position s'est résolue sur B4. Sous SL plafonné, la restriction perd son objet : le plafond, lui, couvre B4",
         ambiguite:     'stop et TP touchés dans la même bougie : le stop gagne (pessimiste)',
+        du:            "dueAfterSl > 0 : REMBOURSER AVANT DE GAGNER. Toute position clôturée dans le rouge laisse sa perte NETTE sur une ardoise ; tout gain la rembourse en commençant par la plus ANCIENNE, et ce qu'il ne couvre pas entièrement reste dû à hauteur du reliquat. Dès que l'ardoise compte dueAfterSl pertes, la position suivante vise le remboursement (champ duePts) au lieu de son vrai TP — même si c'est plus PRÈS que son objectif normal. dueMode = 'full' : l'ardoise ENTIÈRE, qui s'éloigne à mesure qu'elle grossit et peut finir hors d'atteinte ; dueMode = 'step' : un BOND de dueAfterSl × la perte moyenne encore due, soit la taille de ce qui a armé le dû — le remboursement se fait alors en plusieurs fois, chacune atteignable. duePts est ce qui a été VISÉ, dueTotalPts l'ardoise entière au même instant : leur écart est ce qui restera à devoir. Le dû est lu à l'ENTRÉE et n'y bouge plus. « Perte » se juge au NET et non au statut : une sortie BE qui finit sous zéro (le spread) compte comme un SL. AVEC UN SPREAD, rembourser ne solde jamais tout à fait — le gain qui atteint le dû paie lui aussi son aller-retour. ANTI-ANTICIPATION : une sortie ne pèse sur le dû d'une entrée que si elle a eu lieu AVANT la bougie de cette entrée. LE BREAK-EVEN N'EST PAS TOUCHÉ : ses quatre déclencheurs s'arment aux mêmes distances que sur une position ordinaire — le dû déplace la cible, pas la protection. dueArmed compte les positions parties rembourser, dueRemainingPts / dueRemainingSl disent ce qui restait sur l'ardoise au bord des données. Le champ `rr` décrit toujours le TP RÉGLÉ et non l'objectif de remboursement : sur une position à dû, l'objectif visé est duePts, et `tp` en porte le prix. ÉVOLUTION : absente de l'EA MT5",
         breakEven:     "quatre déclencheurs indépendants aux effets différents. PROFIT (beTriggerPts > 0) et DURÉE (beBarsTrigger > 0) DÉPLACENT LE STOP au niveau BE = entrée ± beLevelPts (borné par le stop structurel) — profit dès que le gain atteint le seuil (évalué dès B4), durée dès que la position tient depuis ce nombre de bougies ; sortie sur ce stop → 'be'. SWING (beSwingBars > 0) DÉPLACE LE STOP SOUS LA STRUCTURE : au premier swing formé pendant la position (swing BAS en BUY, HAUT en SELL, extrême strictement au-delà des beSwingBars bougies de chaque côté, confirmé seulement à la clôture de la beSwingBars-ième bougie qui suit le pivot), le stop passe à swing ± slMarginPts — la marge du stop structurel, pas beLevelPts — sans jamais élargir le risque ; sortie sur ce stop → 'be'. Les trois ne déplacent le stop QU'UNE FOIS : le premier armé gagne. RETOURS (beTouchTrigger > 0) NE DÉPLACE RIEN, IL COUPE : dès que le prix est revenu ce nombre de fois sur l'entrée, la position est soldée AU PRIX D'ENTRÉE sur cette bougie → 'be', profitPoints brut = 0, cutAtEntry = true (le spread reste dû). Le TP ne bouge jamais. beReason = premier déclencheur armé ('profit'|'touch'|'bars'|'swing'). Un TP atteint sur la bougie de déclenchement l'emporte ; un stop en gap rempli au pire de l'open",
       },
       positions: positions.map(p => ({
@@ -1868,7 +2568,14 @@ export default function TradingChart({
         tp:             p.tp,
         // Risque propre à la position : la distance au stop structurel.
         risk0:          +p.risk0.toFixed(6),
+        // Le RR du TP RÉGLÉ. Sur une position partie rembourser, ce n'est pas
+        // l'objectif visé : c'est duePts qui l'est, et le champ tp porte le prix.
         rr:             p.risk0 > 0 ? +(params.tpPts / p.risk0).toFixed(4) : null,
+        // Le dû visé par cette position (0 = elle jouait son vrai TP), l'ardoise
+        // entière au même instant, et le nombre de pertes qu'elle comptait.
+        duePts:         p.duePts != null ? +p.duePts.toFixed(6) : null,
+        dueTotalPts:    p.dueTotalPts != null ? +p.dueTotalPts.toFixed(6) : null,
+        dueCount:       p.dueCount ?? null,
         profitPoints:   +p.profitPoints.toFixed(6),
         profitR:        rOf(p.profitPoints, p.risk0),
         // Coût du trade et résultat réel. Le brut reste au-dessus : c'est lui qui
@@ -2425,6 +3132,27 @@ export default function TradingChart({
           <ReportButton nom="rev" couleur="#34D399" bord="rgba(52,211,153,0.55)" onClick={downloadRevReport}
             right={118 + (rfvgStats ? 96 : 0) + (koStats ? 96 : 0) + (hmbmStats ? 96 : 0) + (liqStats ? 96 : 0)} />
         )}
+        {twinsStats && (
+          <ReportButton nom="TB" couleur="#A78BFA" bord="rgba(167,139,250,0.55)" onClick={downloadTwinsReport}
+            right={118 + (rfvgStats ? 96 : 0) + (koStats ? 96 : 0) + (hmbmStats ? 96 : 0) + (liqStats ? 96 : 0) + (revStats ? 96 : 0)} />
+        )}
+        {xfvgxStats && (
+          <ReportButton nom="xFVG+" couleur="#E879F9" bord="rgba(232,121,249,0.55)" onClick={downloadXfvgxReport}
+            right={118 + (rfvgStats ? 96 : 0) + (koStats ? 96 : 0) + (hmbmStats ? 96 : 0)
+                   + (liqStats ? 96 : 0) + (revStats ? 96 : 0) + (twinsStats ? 96 : 0)} />
+        )}
+        {rsierStats && (
+          <ReportButton nom="RSIER" couleur="#F59E0B" bord="rgba(245,158,11,0.55)" onClick={downloadRsierReport}
+            right={118 + (rfvgStats ? 96 : 0) + (koStats ? 96 : 0) + (hmbmStats ? 96 : 0)
+                   + (liqStats ? 96 : 0) + (revStats ? 96 : 0) + (twinsStats ? 96 : 0)
+                   + (xfvgxStats ? 104 : 0)} />
+        )}
+        {harmoStats && (
+          <ReportButton nom="TRENDER" couleur="#34D399" bord="rgba(52,211,153,0.55)" onClick={downloadHarmoReport}
+            right={118 + (rfvgStats ? 96 : 0) + (koStats ? 96 : 0) + (hmbmStats ? 96 : 0)
+                   + (liqStats ? 96 : 0) + (revStats ? 96 : 0) + (twinsStats ? 96 : 0)
+                   + (xfvgxStats ? 104 : 0) + (rsierStats ? 110 : 0)} />
+        )}
 
         {/* Rapport JSON des positions rFVG — le clic lit rfvgReportRef, mis à
             jour par l'effet à chaque chargement de bougies : toujours à jour. */}
@@ -2465,7 +3193,8 @@ export default function TradingChart({
             est en points — le lot est fixe. */}
         {rfvgStats && (() => {
           const { total, tp, sl, be = 0, open, expPts, beThresh, profitFactor, beOn = false,
-                  skippedByCooldown = 0, skippedWon = 0 } = rfvgStats;
+                  skippedByCooldown = 0, skippedWon = 0,
+                  dueArmed = 0, dueRemainingPts = 0, dueRemainingSl = 0 } = rfvgStats;
           const showBe = beOn || be > 0;
           const resolved = tp + sl;
           const wr       = resolved > 0 ? tp / resolved : null;
@@ -2541,6 +3270,25 @@ export default function TradingChart({
                   </span>
                 </div>
               )}
+              {/* Le dû — visible seulement quand il a servi. Deux chiffres :
+                  combien de positions sont parties rembourser, et ce qui reste
+                  sur l'ardoise au bord des données. Un reste qui ne descend
+                  jamais dit que le seuil est trop haut ou que le motif ne
+                  rembourse pas. Même affichage que le moniteur de la famille des
+                  motifs (PatternMonitor). */}
+              {(dueArmed > 0 || dueRemainingSl > 0) && (
+                <div style={row}>
+                  <span style={key}>Dû (armés · reste)</span>
+                  <span style={{ fontWeight: 600 }}>
+                    <span style={{ color: '#F59E0B' }}>{dueArmed}</span>
+                    <span style={{ color: 'rgba(148,163,184,0.6)' }}> · </span>
+                    <span style={{ color: dueRemainingSl > 0 ? '#EF5350' : '#26A69A' }}>
+                      {dueRemainingPts.toFixed(1)} pts
+                    </span>
+                    <span style={{ color: 'rgba(148,163,184,0.7)', fontWeight: 500 }}> ({dueRemainingSl})</span>
+                  </span>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -2557,6 +3305,71 @@ export default function TradingChart({
             rr={patterns.find(p => p.type === 'REV' && p.enabled)?.rr ?? 2}
             top={10 + (rfvgStats ? 112 : 0) + (koStats ? 112 : 0) + (hmbmStats ? 112 : 0) + (liqStats ? 132 : 0)} />
         )}
+
+        {/* Moniteur Twins Bars : même composant encore, sous celui du rev. Seule
+            différence, le RR affiché — ce motif peut régler son TP en points, et
+            n'a alors aucun RR visé : c'est le médian RÉALISÉ qui s'affiche. */}
+        {twinsStats && (() => {
+          const pat    = patterns.find(p => p.type === 'TWINS_BARS' && p.enabled);
+          const enPts  = pat?.tpMode === 'points';
+          const rrVal  = enPts
+            ? (twinsStats.rrMed != null ? +twinsStats.rrMed.toFixed(2) : null)
+            : (pat?.rr ?? 2);
+          return (
+            <PatternMonitor nom="TB" couleur="#A78BFA" stats={twinsStats}
+              rr={rrVal} rrMedian={enPts}
+              top={10 + (rfvgStats ? 112 : 0) + (koStats ? 112 : 0) + (hmbmStats ? 112 : 0)
+                   + (liqStats ? 132 : 0) + (revStats ? 132 : 0)} />
+          );
+        })()}
+
+        {/* Moniteur xFVG+ : SL et TP y sont tous deux fixes et en points, donc le
+            RR est un simple rapport entre deux réglages — pas une médiane à
+            deviner. */}
+        {xfvgxStats && (() => {
+          const pat   = patterns.find(p => p.type === 'XFVGX' && p.enabled);
+          const slPts = pat?.slPts ?? 10;
+          const tpPts = pat?.tpPts ?? 10;
+          const rrVal = slPts > 0 ? +(tpPts / slPts).toFixed(2) : null;
+          return (
+            <PatternMonitor nom="xFVG+" couleur="#E879F9" stats={xfvgxStats}
+              rr={rrVal}
+              top={10 + (rfvgStats ? 112 : 0) + (koStats ? 112 : 0) + (hmbmStats ? 112 : 0)
+                   + (liqStats ? 132 : 0) + (revStats ? 132 : 0) + (twinsStats ? 132 : 0)} />
+          );
+        })()}
+
+        {/* Moniteur RSIER : dernier de la pile. Comme Twins Bars, son TP peut se
+            régler en points — le RR affiché est alors le médian RÉALISÉ, faute de
+            RR visé. */}
+        {rsierStats && (() => {
+          const pat   = patterns.find(p => p.type === 'RSIER' && p.enabled);
+          const enPts = pat?.tpMode === 'points';
+          const rrVal = enPts
+            ? (rsierStats.rrMed != null ? +rsierStats.rrMed.toFixed(2) : null)
+            : (pat?.rr ?? 2);
+          return (
+            <PatternMonitor nom="RSIER" couleur="#F59E0B" stats={rsierStats}
+              rr={rrVal} rrMedian={enPts}
+              top={10 + (rfvgStats ? 112 : 0) + (koStats ? 112 : 0) + (hmbmStats ? 112 : 0)
+                   + (liqStats ? 132 : 0) + (revStats ? 132 : 0) + (twinsStats ? 132 : 0)
+                   + (xfvgxStats ? 132 : 0)} />
+          );
+        })()}
+
+        {/* Moniteur du motif TRENDER, dernier de la pile. SL et TP y étant fixes
+            et indépendants, aucun RR n'est VISÉ : c'est toujours le RR réalisé
+            médian qui s'affiche. */}
+        {harmoStats && (() => {
+          const rrVal = harmoStats.rrMed != null ? +harmoStats.rrMed.toFixed(2) : null;
+          return (
+            <PatternMonitor nom="TRENDER" couleur="#34D399" stats={harmoStats}
+              rr={rrVal} rrMedian
+              top={10 + (rfvgStats ? 112 : 0) + (koStats ? 112 : 0) + (hmbmStats ? 112 : 0)
+                   + (liqStats ? 132 : 0) + (revStats ? 132 : 0) + (twinsStats ? 132 : 0)
+                   + (xfvgxStats ? 132 : 0) + (rsierStats ? 132 : 0)} />
+          );
+        })()}
 
         {/* Rapport JSON des positions KO. Les boutons de rapport s'empilent vers
             la gauche dans l'ordre rFVG → KO → HM-BM. */}
@@ -2770,31 +3583,46 @@ export default function TradingChart({
           );
         })()}
 
-        {/* TRENDER : historique HTF insuffisant. L'harmonie stricte exige les 3
-            HTF alignés ; tant que la Bollinger du plus lent n'a pas démarré, sa
-            tendance vaut 0 et AUCUNE zone ne peut exister. Sans ce message, le
-            graphe reste vide sans raison apparente. */}
-        {trenderWarmup && (
+        {/* Historique HTF insuffisant — TRENDER et RSIER lisent tous deux une
+            unité supérieure, et tous deux restent MUETS tant qu'elle n'a pas
+            assez de bougies : l'harmonie stricte exige les 3 HTF alignés, or la
+            tendance vaut 0 avant que la Bollinger n'ait démarré ; le RSIER, lui,
+            n'a pas de RSI du tout. Sans ce message, le graphe reste vide sans
+            raison apparente. Empilés, parce que les deux peuvent parler ensemble. */}
+        {(trenderWarmup || rsierWarmup || harmoWarmup) && (
           <div
             style={{
               position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
-              zIndex: 12, display: 'flex', alignItems: 'center', gap: 8,
-              padding: '7px 13px', borderRadius: 999,
-              border: '1px solid rgba(245,158,11,0.4)',
-              background: 'rgba(20,15,5,0.88)',
-              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-              color: '#FCD34D', fontSize: 11.5, fontWeight: 600,
-              fontFamily: 'Inter, system-ui, sans-serif',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
+              zIndex: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
             }}
           >
-            <span style={{ fontSize: 13 }}>⚠</span>
-            <span>
-              TRENDER — historique insuffisant en {trenderWarmup.htf} :{' '}
-              <strong>{trenderWarmup.have}</strong> bougies chargées sur{' '}
-              <strong>{trenderWarmup.need}</strong>. Fais défiler vers la gauche pour en charger,
-              ou choisis une unité de temps plus courte.
-            </span>
+            {[
+              trenderWarmup && { who: 'TRENDER (indicateur)', w: trenderWarmup },
+              harmoWarmup   && { who: 'TRENDER (motif)',      w: harmoWarmup },
+              rsierWarmup   && { who: 'RSIER',                w: rsierWarmup },
+            ].filter(Boolean).map(({ who, w }) => (
+              <div
+                key={who}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '7px 13px', borderRadius: 999,
+                  border: '1px solid rgba(245,158,11,0.4)',
+                  background: 'rgba(20,15,5,0.88)',
+                  backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                  color: '#FCD34D', fontSize: 11.5, fontWeight: 600,
+                  fontFamily: 'Inter, system-ui, sans-serif',
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
+                }}
+              >
+                <span style={{ fontSize: 13 }}>⚠</span>
+                <span>
+                  {who} — historique insuffisant en {w.htf} :{' '}
+                  <strong>{w.have}</strong> bougies chargées sur{' '}
+                  <strong>{w.need}</strong>. Fais défiler vers la gauche pour en charger,
+                  ou choisis une unité de temps plus courte.
+                </span>
+              </div>
+            ))}
           </div>
         )}
 

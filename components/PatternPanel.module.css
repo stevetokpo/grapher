@@ -270,6 +270,32 @@
 .numInput::-webkit-inner-spin-button,
 .numInput::-webkit-outer-spin-button { opacity: 0.4; }
 
+/* ── Liste déroulante (champ de schéma « select ») ──────────────── */
+.select {
+  background: rgba(9, 12, 22, 0.80);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font);
+  padding: 7px 30px 7px 12px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%23A78BFA' stroke-width='1.2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.select:hover { border-color: var(--border-2); }
+.select:focus {
+  border-color: rgba(167, 139, 250, 0.50);
+  box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.12);
+}
+
 /* ── Color swatches ─────────────────────────────────────────────── */
 .colorRow {
   display: flex;

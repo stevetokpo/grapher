@@ -1,8 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { htfRequests } from '../lib/harmony';
+import { rsierHtfRequests } from '../lib/rsier/detect';
+import { trenderHtfRequests } from '../lib/trender/params';
+import { mergeHtfRequests } from '../lib/htf';
 
 // Charge les séries des unités de temps supérieures dont les indicateurs TRENDER
-// ont besoin — l'équivalent du request.security de Pine.
+// et les motifs RSIER / TRENDER ont besoin — l'équivalent du request.security de
+// Pine.
+// Deux lecteurs du même HTF ne font qu'une requête : c'est la plus gourmande en
+// historique qui est servie, et elle contient l'autre.
 //
 // Les bougies du graphe sont paginées (500 par page) et une Bollinger 50 en H16
 // réclame ~34 jours d'historique : reconstruire la série HTF depuis ce qui est
@@ -16,12 +22,16 @@ import { htfRequests } from '../lib/harmony';
 // qui évite de recharger à chaque avancée du curseur.
 //
 // Renvoie { H1: [{ time, close }], H4: [...] } — ou null si rien à charger.
-export function useHtfBars(symbolId, indicators, candles) {
+export function useHtfBars(symbolId, indicators, patterns, candles) {
   const [series, setSeries] = useState(null);
 
   const reqs = useMemo(
-    () => htfRequests(indicators, candles),
-    [indicators, candles],
+    () => mergeHtfRequests(
+      htfRequests(indicators, candles),
+      rsierHtfRequests(patterns, candles),
+      trenderHtfRequests(patterns, candles),
+    ),
+    [indicators, patterns, candles],
   );
   // Une clé stable : sans elle, le tableau `reqs` étant recréé à chaque rendu,
   // l'effet se relancerait en boucle.

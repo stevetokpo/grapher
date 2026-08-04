@@ -1,8 +1,14 @@
 import { useState, useEffect } from 'react';
 import styles from './PatternPanel.module.css';
 import { XFVG_DEFAULTS, FIELDS as XFVG_FIELDS } from '../lib/xfvg/params';
+import { XFVGX_DEFAULTS, FIELDS as XFVGX_FIELDS } from '../lib/xfvgx/params';
 import { LIQ_DEFAULTS,  FIELDS as LIQ_FIELDS  } from '../lib/liq/params';
 import { REV_DEFAULTS,  FIELDS as REV_FIELDS  } from '../lib/rev/params';
+import { RINGBLE_DEFAULTS, FIELDS as RINGBLE_FIELDS } from '../lib/ringble/params';
+import { SUPER_AVAL_DEFAULTS, FIELDS as SUPER_AVAL_FIELDS } from '../lib/superAval/params';
+import { RSIER_DEFAULTS, FIELDS as RSIER_FIELDS } from '../lib/rsier/params';
+import { TRENDER_DEFAULTS, FIELDS as TRENDER_FIELDS } from '../lib/trender/params';
+import { TWINS_DEFAULTS, FIELDS as TWINS_FIELDS } from '../lib/twins/params';
 
 const COLORS = [
   '#26A69A', '#EF5350', '#60A5FA', '#F59E0B',
@@ -16,18 +22,16 @@ const COLORS = [
 // Add an entry here each time a new pattern is implemented.
 export const PATTERN_TYPES = [
   {
-    type:      'TWINS_BARS',
-    label:     'Twins Bars',
-    desc:      'Deux bougies opposées à corps plein, de taille similaire et large vs ATR',
-    color:     '#A78BFA',
-    direction: 'both',
-    bullColor: '#26A69A',
-    bearColor: '#EF5350',
-    showLabel: true,
-    markerSize: 1,
-    similarityRatio: 0.7,
-    atrPeriod:       7,
-    atrMult:         1.6,
+    // Twins Bars — deux bougies COLLÉES et de sens opposés, à corps plein et de
+    // taille voisine. Le sens du signal est celui de la seconde. Détection,
+    // réglages et positions dans lib/twins/ ; ce bloc ne porte que l'identité.
+    // L'entrée est AU MARCHÉ et seulement là : le motif est un repère, pas une
+    // zone où poser un ordre en attente.
+    type:   'TWINS_BARS',
+    label:  'Twins Bars',
+    desc:   'Deux bougies opposées à corps plein, de taille similaire et large vs ATR',
+    color:  '#A78BFA',
+    ...TWINS_DEFAULTS,
   },
   {
     type:          'FVG',
@@ -62,9 +66,13 @@ export const PATTERN_TYPES = [
     opacity:   0.18,
     showLabel: true,
     minPts:       0,
+    maxPts:       0,   // hauteur max de la zone, en points (0 = pas de plafond)
     maPeriodFast: 15,
     maPeriodSlow: 200,
     slowOpenOnly: false,
+    firstSlowSide: false,
+    slowStraddle:  false,
+    pairOpposite:  false,
     atrPeriod: 14,
     atrMult:   1.5,
     atrMult3:  0,
@@ -85,6 +93,10 @@ export const PATTERN_TYPES = [
     beLevelPts:    0,
     uniqueTrade:   false,
     skipAfterTp:   0,
+    // Le dû — même règle que le Twins Bars, même fichier (lib/dueLedger.js).
+    // 0 = éteint : le motif joue son vrai TP et ne rembourse rien.
+    dueAfterSl:    0,
+    dueMode:       'full',
   },
   {
     // xFVG — deux figures sous un même interrupteur, choisies par le réglage
@@ -99,6 +111,21 @@ export const PATTERN_TYPES = [
     color:  '#38BDF8',
     render: 'zone',
     ...XFVG_DEFAULTS,
+  },
+  {
+    // xFVG+ — le xFVG EXTRA, sorti en pattern à lui : la boîte contient le
+    // dernier swing d'en face, et c'est ce prix-là qu'on attend. Même détecteur
+    // que le xFVG (calcXFVG, `swing` forcé sur 'extra' dans lib/xfvgx/detect.js) ;
+    // ce que ce pattern ajoute, l'autre ne l'a pas : un ordre en attente sur le
+    // trait, SL et TP fixes en points, un moniteur et un rapport.
+    // Ses réglages vivent dans lib/xfvgx/params.js — c'est là qu'on ajoute un
+    // réglage, pas ici. Ce bloc ne porte que l'identité.
+    type:   'XFVGX',
+    label:  'xFVG+',
+    desc:   'xFVG dont la zone contient le swing cassé — entrée au retour sur ce trait',
+    color:  '#E879F9',
+    render: 'zone',
+    ...XFVGX_DEFAULTS,
   },
   {
     // liq — la pince : deux impulsions opposées séparées par une respiration,
@@ -122,6 +149,64 @@ export const PATTERN_TYPES = [
     color:  '#34D399',
     render: 'zone',
     ...REV_DEFAULTS,
+  },
+  {
+    // ringble — DEUX bougies collées et de sens opposés : HB (haussière puis
+    // baissière) ou BH (baissière puis haussière). La SECONDE porte tout — le
+    // sens comme les conditions ; la première n'est là que comme mesure.
+    // Motif en cours d'écriture : pas de zone, pas de position, un repère et
+    // c'est tout. Ses réglages vivent dans lib/ringble/params.js — c'est là
+    // qu'on ajoute une condition, pas ici. Ce bloc ne porte que l'identité.
+    type:   'RINGBLE',
+    label:  'ringble',
+    desc:   'Deux bougies opposées — la 2e ni plus petite ni beaucoup plus grande que la 1e, et à corps plein',
+    color:  '#F472B6',
+    ...RINGBLE_DEFAULTS,
+  },
+  {
+    // super avalante — UNE bougie qui en avale plusieurs d'un coup : elle est
+    // précédée d'une bougie de sens opposé, et les N bougies encore DERRIÈRE
+    // celle-ci tiennent entièrement entre son plus haut et son plus bas. La
+    // bougie opposée, elle, a le droit de dépasser — c'est ce qui la distingue
+    // d'une avalante classique. Un repère, pas de zone ni de position. Ses
+    // réglages vivent dans lib/superAval/params.js — c'est là qu'on ajoute une
+    // condition, pas ici. Ce bloc ne porte que l'identité.
+    type:   'SUPER_AVAL',
+    label:  'super avalante',
+    desc:   'Une bougie qui avale entièrement les N bougies situées derrière la bougie opposée',
+    color:  '#22D3EE',
+    ...SUPER_AVAL_DEFAULTS,
+  },
+  {
+    // RSIER — les surzones du RSI d'une unité de temps SUPÉRIEURE, marquées sur
+    // le graphe comme le TRENDER marque ses zones d'harmonie : une bande
+    // verticale, pas une boîte de prix. Non-repaint : chaque bougie du graphe lit
+    // le RSI de la dernière bougie HTF CLÔTURÉE. Ses réglages vivent dans
+    // lib/rsier/params.js — c'est là qu'on ajoute une condition, pas ici. Ce
+    // bloc ne porte que l'identité.
+    type:   'RSIER',
+    label:  'RSIER',
+    desc:   'Le RSI d’une unité de temps supérieure en surachat / survente — marqué en zone',
+    color:  '#F59E0B',
+    render: 'zone',
+    ...RSIER_DEFAULTS,
+  },
+  {
+    // TRENDER — la logique de l'INDICATEUR du même nom, à l'identique : c'est la
+    // même fonction (lib/harmony.js) qui calcule les deux, appelée ici via
+    // lib/trender/detect.js. Ce que le motif ajoute, l'indicateur ne l'a pas :
+    // un filtre de sens, et surtout la position, sa gestion et son rapport.
+    // Le type est 'HARMONY' et non 'TRENDER' pour qu'aucun code ne confonde un
+    // MOTIF avec l'INDICATEUR, qui porte déjà ce type dans son propre registre —
+    // l'étiquette, elle, dit bien TRENDER, c'est le même objet à l'écran.
+    // Ses réglages vivent dans lib/trender/params.js ; ce bloc ne porte que
+    // l'identité.
+    type:   'HARMONY',
+    label:  'TRENDER',
+    desc:   'Harmonie multi-HTF — la zone s’ouvre quand tous les HTF pointent dans le même sens',
+    color:  '#34D399',
+    render: 'zone',
+    ...TRENDER_DEFAULTS,
   },
   {
     // KO — la sœur du rFVG en DEUX bougies : même famille (impulsion à
@@ -358,6 +443,16 @@ function SchemaField({ field, form, defaults, setF }) {
         </div>
       )}
 
+      {kind === 'select' && (
+        <select
+          className={styles.select}
+          value={value}
+          onChange={e => setF({ [key]: e.target.value })}
+        >
+          {field.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      )}
+
       {kind === 'color' && (
         <Swatches value={value} onChange={c => setF({ [key]: c })} />
       )}
@@ -445,109 +540,21 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
         </ul>
 
         {/* ── Config form ────────────────────────────────────────────── */}
+        {/* Twins Bars — aucun champ écrit ici : tout vient de lib/twins/params.js.
+            Le formulaire était écrit à la main comme ceux du FVG et du rFVG ; il
+            est passé au schéma le jour où le motif a gagné ses positions, sinon
+            chaque réglage de sortie aurait été un bloc JSX de plus. */}
         {editingType === 'TWINS_BARS' && (
           <div className={styles.formSection}>
             <div className={styles.formHeader}>
               <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
                 {editingMeta?.label}
               </span>
-              <span className={styles.formSubtitle}>règles de détection</span>
+              <span className={styles.formSubtitle}>deux bougies opposées à corps plein · entrée au marché</span>
               <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
             </div>
 
-            <div className={styles.field}>
-              <span className={styles.label}>Direction</span>
-              <div className={styles.segmented}>
-                {[
-                  { value: 'bull', label: '↑ Haussier' },
-                  { value: 'both', label: '↕ Les deux' },
-                  { value: 'bear', label: '↓ Baissier' },
-                ].map(o => (
-                  <button
-                    key={o.value}
-                    className={`${styles.segBtn}${form.direction === o.value ? ` ${styles.segBtnActive}` : ''}`}
-                    onClick={() => setF({ direction: o.value })}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className={styles.field}>
-              <span className={styles.label} style={{ color: '#26A69A' }}>Couleur haussière</span>
-              <Swatches value={form.bullColor ?? '#26A69A'} onChange={c => setF({ bullColor: c })} />
-            </div>
-
-            <div className={styles.field}>
-              <span className={styles.label} style={{ color: '#EF5350' }}>Couleur baissière</span>
-              <Swatches value={form.bearColor ?? '#EF5350'} onChange={c => setF({ bearColor: c })} />
-            </div>
-
-            <div className={styles.fieldRow}>
-              <div className={styles.field}>
-                <span className={styles.label}>Taille marqueur</span>
-                <div className={styles.segmented}>
-                  {[1, 2, 3].map(s => (
-                    <button
-                      key={s}
-                      className={`${styles.segBtn}${(form.markerSize ?? 1) === s ? ` ${styles.segBtnActive}` : ''}`}
-                      onClick={() => setF({ markerSize: s })}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className={styles.field}>
-                <span className={styles.label}>Labels</span>
-                <button
-                  className={`${styles.toggleBtn}${form.showLabel !== false ? ` ${styles.toggleBtnOn}` : ''}`}
-                  onClick={() => setF({ showLabel: form.showLabel === false })}
-                >
-                  {form.showLabel !== false ? 'Activés' : 'Désactivés'}
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.sectionDivider}>Ressemblance des corps</div>
-
-            <div className={styles.field}>
-              <span className={styles.label}>Ratio de similarité (corps min / corps max)</span>
-              <NumInput
-                value={form.similarityRatio ?? 0.7}
-                min={0.1} max={1} step={0.05}
-                onChange={v => setF({ similarityRatio: v })}
-              />
-            </div>
-            <p className={styles.hint}>
-              0.7 = le plus petit corps doit faire ≥ 70 % du plus grand. Plus élevé = jumeaux plus proches.
-            </p>
-
-            <div className={styles.sectionDivider}>Filtre taille ATR</div>
-
-            <div className={styles.fieldRow}>
-              <div className={styles.field}>
-                <span className={styles.label}>Période ATR (0 = désactivé)</span>
-                <NumInput
-                  value={form.atrPeriod ?? 7}
-                  min={0} max={50} step={1}
-                  onChange={v => setF({ atrPeriod: v })}
-                />
-              </div>
-              <div className={styles.field}>
-                <span className={styles.label}>Multiplicateur ATR</span>
-                <NumInput
-                  value={form.atrMult ?? 1.6}
-                  min={0.1} max={5} step={0.1}
-                  onChange={v => setF({ atrMult: v })}
-                />
-              </div>
-            </div>
-            <p className={styles.hint}>
-              Les deux corps TB doivent dépasser ATR(période) × multiplicateur. Plus bas = plus de
-              signaux ; mettre la période à 0 désactive le filtre.
-            </p>
+            <SchemaForm fields={TWINS_FIELDS} form={form} defaults={TWINS_DEFAULTS} setF={setF} />
 
             <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
           </div>
@@ -704,6 +711,24 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
           </div>
         )}
 
+        {/* xFVG+ — aucun champ écrit ici : tout vient de lib/xfvgx/params.js, qui
+            réutilise lui-même les blocs de figure du xFVG. */}
+        {editingType === 'XFVGX' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>la zone contient le swing cassé · entrée au retour</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={XFVGX_FIELDS} form={form} defaults={XFVGX_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
         {/* liq — aucun champ écrit ici : tout vient de lib/liq/params.js. */}
         {editingType === 'LIQ' && (
           <div className={styles.formSection}>
@@ -733,6 +758,74 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
             </div>
 
             <SchemaForm fields={REV_FIELDS} form={form} defaults={REV_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {/* ringble — aucun champ écrit ici : tout vient de lib/ringble/params.js. */}
+        {editingType === 'RINGBLE' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>HB · BH — deux bougies opposées</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={RINGBLE_FIELDS} form={form} defaults={RINGBLE_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {/* super avalante — aucun champ écrit ici : tout vient de lib/superAval/params.js. */}
+        {editingType === 'SUPER_AVAL' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>une bougie qui en avale plusieurs</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={SUPER_AVAL_FIELDS} form={form} defaults={SUPER_AVAL_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {/* RSIER — aucun champ écrit ici : tout vient de lib/rsier/params.js. */}
+        {editingType === 'RSIER' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>surzones du RSI d’un HTF</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={RSIER_FIELDS} form={form} defaults={RSIER_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {/* TRENDER — aucun champ écrit ici : tout vient de lib/trender/params.js. */}
+        {editingType === 'HARMONY' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>harmonie multi-HTF</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={TRENDER_FIELDS} form={form} defaults={TRENDER_DEFAULTS} setF={setF} />
 
             <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
           </div>
@@ -779,6 +872,68 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
               <b> superFVG</b> : sous-ensemble des rFVG dont la 3e bougie (celle qui referme le gap)
               clôture à contre-sens du motif — rFVG haussier + 3e bougie baissière, ou rFVG baissier
               + 3e bougie haussière.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Premier du côté de la MM lente</span>
+              <button
+                className={`${styles.toggleBtn}${form.firstSlowSide === true ? ` ${styles.toggleBtnOn}` : ''}`}
+                onClick={() => setF({ firstSlowSide: form.firstSlowSide !== true })}
+              >
+                {form.firstSlowSide === true ? 'Activé' : 'Désactivé'}
+              </button>
+            </div>
+            <p className={styles.hint}>
+              Filtre fait pour l'<b>aFVG</b>. Ne garde que le <b>premier</b> motif de chaque sens dont la
+              zone est <b>entièrement</b> du bon côté de la MM lente : bas de la boîte au-dessus de la MM
+              si haussier, haut de la boîte en dessous si baissier — les deux bornes, pas la bougie
+              centrale. Une fois un motif retenu, le sens se tait jusqu'à ce que le prix repasse de
+              l'autre côté (une bougie qui clôture sous la MM lente réarme le haussier, au-dessus le
+              baissier) : chaque nouveau régime a droit à son premier. Les motifs recalés par les
+              autres filtres ne consomment pas le tour. En mode « Seuls les rFVG » ou « superFVG » il
+              ne laisse presque rien passer : ces modes veulent la centrale du côté OPPOSÉ.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Centrale à cheval sur la MM lente</span>
+              <button
+                className={`${styles.toggleBtn}${form.slowStraddle === true ? ` ${styles.toggleBtnOn}` : ''}`}
+                onClick={() => setF({ slowStraddle: form.slowStraddle !== true })}
+              >
+                {form.slowStraddle === true ? 'Activé' : 'Désactivé'}
+              </button>
+            </div>
+            <p className={styles.hint}>
+              Second filtre fait pour l'<b>aFVG</b>, indépendant du précédent. La 2e bougie du motif —
+              la centrale, celle qui creuse le gap — doit être <b>coupée</b> par la MM lente : son plus
+              bas en dessous ET son plus haut au-dessus. C'est l'amplitude qui est jugée, mèche
+              comprise ; le corps a le droit de rester d'un seul côté. Effleurer la MM ne suffit pas.
+              Il contredit les modes « Seuls les rFVG » et « superFVG », qui veulent la centrale
+              entièrement d'un côté — sauf si « MM lente — ouverture seule » est activé, la centrale
+              a alors le droit de traverser.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Paire de sens contraires</span>
+              <button
+                className={`${styles.toggleBtn}${form.pairOpposite === true ? ` ${styles.toggleBtnOn}` : ''}`}
+                onClick={() => setF({ pairOpposite: form.pairOpposite !== true })}
+              >
+                {form.pairOpposite === true ? 'Activé' : 'Désactivé'}
+              </button>
+            </div>
+            <p className={styles.hint}>
+              Ne garde que les motifs qui vont <b>par deux</b>, emboîtés et opposés : la <b>3e bougie du
+              premier</b> est la <b>1re du second</b>, donc les deux bougies centrales sont à deux barres
+              d'écart et l'ensemble tient sur 5 bougies. Le second doit être de sens contraire au
+              premier. Les <b>deux</b> zones sont dessinées, chacune avec sa boîte. Chaque motif est
+              d'abord un aFVG complet : il passe tous les autres filtres avant d'être apparié. Les
+              paires peuvent s'enchaîner (centrales i, i+2, i+4 de sens alternés = deux paires,
+              trois zones) et se chevaucher (deux centrales voisines portant chacune la sienne).
+              Ici <b>Direction</b> change de sens : elle ne trie plus les zones une à une
+              — ça couperait les paires en deux — mais choisit les <b>paires</b> par le sens du premier
+              motif. À ne pas combiner avec « Premier du côté de la MM lente » : celui-ci ne garde
+              qu'un motif par sens et par régime, une paire n'y survit pas.
             </p>
 
             <div className={styles.field}>
@@ -1118,6 +1273,82 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
                   {' '}déplacent tous les trois le stop, mais il ne bouge qu'<b>une fois</b> : le
                   premier armé pose le stop, les suivants ne le rejouent pas.
                 </p>
+
+                <div className={styles.sectionDivider}>Le dû</div>
+
+                <div className={styles.field}>
+                  <span className={styles.label}>Dû — seuil (pertes non remboursées, 0 = off)</span>
+                  <NumInput
+                    value={form.dueAfterSl ?? 0}
+                    min={0} max={100} step={1}
+                    onChange={v => setF({ dueAfterSl: v })}
+                  />
+                </div>
+                <p className={styles.hint}>
+                  <b>Rembourser avant de gagner.</b> Chaque position clôturée dans le rouge laisse
+                  sa perte sur une ardoise ; chaque gain la rembourse en commençant par la plus
+                  {' '}<b>ancienne</b>. Dès que l'ardoise compte ce nombre de pertes, la position
+                  suivante vise la <b>somme</b> de l'ardoise au lieu de son vrai TP — et elle la vise
+                  même si c'est plus <b>près</b> que son objectif normal. Une fois remboursé, le
+                  motif repart sur son vrai TP. Même règle et même code que le Twins Bars.
+                </p>
+
+                {(form.dueAfterSl ?? 0) > 0 && (
+                  <>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Remboursement</span>
+                      <div className={styles.segmented}>
+                        {[
+                          { value: 'full', label: "Tout d'un coup" },
+                          { value: 'step', label: 'Par bonds' },
+                        ].map(o => (
+                          <button
+                            key={o.value}
+                            className={`${styles.segBtn}${(form.dueMode ?? 'full') === o.value ? ` ${styles.segBtnActive}` : ''}`}
+                            onClick={() => setF({ dueMode: o.value })}
+                          >
+                            {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <p className={styles.hint}>
+                      {(form.dueMode ?? 'full') === 'step' ? (
+                        <>
+                          Par <b>bonds</b> de « seuil × perte moyenne encore due » — la taille exacte
+                          de ce qui a armé le dû. Au moment de l'armement c'est toute l'ardoise ;
+                          ensuite, si elle a grossi, c'en est une fraction, et il faudra plusieurs
+                          remboursements. L'idée : un objectif qui garde la même taille au lieu de
+                          fuir avec l'ardoise.
+                        </>
+                      ) : (
+                        <>
+                          <b>Tout d'un coup</b> : l'objectif vaut l'ardoise <b>entière</b>. Plus elle
+                          grossit, plus il s'éloigne — au bout d'une longue série il peut devenir hors
+                          d'atteinte, et un objectif qu'on n'atteint pas ne rembourse rien.
+                          {' '}« Par bonds » existe pour ça.
+                        </>
+                      )}
+                    </p>
+                    <p className={styles.hint}>
+                      Le dû se compte en points <b>nets</b> : une sortie au break-even qui finit sous
+                      zéro (le spread) est une perte et compte dans le seuil. Avec un spread,
+                      rembourser ne solde donc jamais tout à fait — le gain qui atteint le dû paie lui
+                      aussi son aller-retour, et il reste exactement un spread sur l'ardoise. Le
+                      {' '}<b>break-even n'est pas touché</b> : ses quatre déclencheurs s'arment aux
+                      mêmes distances que sur une position ordinaire. Le dû déplace la cible, pas la
+                      protection.
+                    </p>
+                    {form.uniqueTrade !== true && (
+                      <p className={styles.hint}>
+                        ⚠ Sans <b>trade unique</b>, les positions se chevauchent : une sortie ne pèse
+                        sur le dû d'une entrée que si elle a eu lieu <b>avant</b> elle. Le dû lu par
+                        une position peut donc être plus petit que l'ardoise réelle au même instant —
+                        c'est le prix de ne pas remonter le temps.
+                      </p>
+                    )}
+                  </>
+                )}
               </>
             )}
 
@@ -1145,6 +1376,23 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
               la 3e bougie, une valeur <b>négative</b> accepte qu'elles se chevauchent
               jusqu'à cette profondeur — la zone est alors la bande commune aux deux
               bougies au lieu du vide.
+            </p>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Hauteur max de la zone (points, 0 = off)</span>
+              <NumInput
+                value={form.maxPts ?? 0}
+                min={0} max={100000} step={0.1}
+                onChange={v => setF({ maxPts: v })}
+              />
+            </div>
+            <p className={styles.hint}>
+              Ne garde que les motifs dont la zone est <b>haute d'au plus</b> ce nombre de points :
+              à 5, seuls les gaps de 5 points ou moins s'affichent. C'est la <b>boîte telle qu'elle
+              est dessinée</b> qui est mesurée, donc la valeur absolue du gap — un chevauchement de
+              8 points fait une zone de 8, comme un vide de 8. Avec le <b>gap minimum</b> juste
+              au-dessus, la zone se trouve encadrée des deux côtés ; ici c'est le plafond, là-bas le
+              plancher. <b>0 = aucun plafond</b>, le motif est celui d'avant.
             </p>
 
             <div className={styles.fieldRow}>

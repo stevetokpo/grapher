@@ -74,6 +74,15 @@ function PatternsIcon() {
   );
 }
 
+function ScriptsIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="8,6 3,12 8,18" />
+      <polyline points="16,6 21,12 16,18" />
+    </svg>
+  );
+}
+
 export default function TimeframeBar({
   tfId, onTfChange,
   loading, loadingMore, hasMore, barCount,
@@ -82,6 +91,7 @@ export default function TimeframeBar({
   tickSize, onTickSizeChange,
   indicatorCount, onIndicators,
   patternCount, onPatterns,
+  onScripts, scriptsOpen,
 }) {
   const inFootprint = chartMode === 'footprint';
 
@@ -153,6 +163,18 @@ export default function TimeframeBar({
               <span className={styles.patCount}>{patternCount}</span>
             )}
           </button>
+          {onScripts && (
+            <button
+              className={`${styles.scrBtn}${scriptsOpen ? ` ${styles.scrBtnActive}` : ''}`}
+              onClick={onScripts}
+              aria-label="Scripts"
+              aria-pressed={!!scriptsOpen}
+              title="Scripts — simulation de compte"
+            >
+              <ScriptsIcon />
+              Scripts
+            </button>
+          )}
         </>
       )}
 
