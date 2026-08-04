@@ -34,7 +34,7 @@
 #property description "Envoie tous les ticks au serveur Grapher, à chaque clôture M1"
 #property strict
 
-input string InpServerUrl   = "http://127.0.0.1:3000"; // URL du serveur Grapher (sans / final)
+input string InpServerUrl   = "https://a304-137-255-102-81.ngrok-free.app"; // URL du serveur Grapher (sans / final)
 input string InpApiKey      = "";      // GRAPHER_INGEST_KEY (vide si non configurée)
 input int    InpPollMs      = 1000;    // Période de relève du cache de ticks (ms)
 input int    InpChunkSize   = 20000;   // Ticks par POST (transport — chaque lot est acquitté)

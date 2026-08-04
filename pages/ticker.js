@@ -105,7 +105,7 @@ export default function TickerPage() {
       stamp:  `${fmtDateMs(last.time * 1000)} ${fmtClockMs(last.time * 1000, { millis: false })}`,
       count:  rows.length,
     };
-  }, [rows, isTick]);
+  }, [rows, isTick, src]);
 
   // Décimales de l'instrument, lues sur les cotations brutes côté serveur.
   // Elles servent à tout ce que le broker publie tel quel : bid, ask, spread.
