@@ -6,7 +6,9 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "telegram": "node scripts/telegram-chatid.mjs"
+    "telegram": "node scripts/telegram-chatid.mjs",
+    "rsi-lab": "node scripts/rsi-lab.mjs",
+    "dollars-test": "node --import ./scripts/esm-hooks.mjs scripts/dollars-selftest.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

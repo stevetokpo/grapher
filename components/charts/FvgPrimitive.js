@@ -15,6 +15,12 @@
 // Any gap family sharing the FVG zone shape ({ side, state, top, bottom,
 // startTime, endTime }) can reuse it — the rFVG does, via labelText.
 //
+// A zone whose top and bottom are the SAME price is drawn as a thick coloured
+// LINE instead of a box — there is nothing to fill. That is how a family offers
+// a simplified view without a second primitive to maintain: the $$$ uses it to
+// show the single edge its two boxes share. Thickness comes from the zone
+// (`thickness`, default 3px).
+//
 // A zone may also carry an optional price level ({ swingTime, swingPrice }),
 // drawn as an opaque WHITE line inside the box, from that bar to the box's
 // right edge — a price to wait for, not another edge of the box, so it never
@@ -68,7 +74,32 @@ class FvgRenderer {
         const yBottom = Math.round(r.yBottom * vr);
         const w = x2 - x1;
         const h = yBottom - yTop;
-        if (w <= 0 || h <= 0) continue;
+        if (w <= 0) continue;
+
+        // ZONE PLATE = UN TRAIT. Une bande dont les deux bords sont au même prix
+        // n'a rien à remplir : elle se dessine comme un segment épais, dans la
+        // couleur de la zone et à pleine opacité — un trait à 0,18 d'alpha ne se
+        // verrait pas, alors qu'un aplat de 40 pixels à la même valeur, si.
+        // C'est ce qui permet à un motif de proposer un affichage SIMPLIFIÉ
+        // (le $$$ et son pivot) sans seconde primitive à entretenir.
+        // Le cas couvre aussi les bandes si fines qu'elles s'arrondissent à zéro
+        // pixel : elles disparaissaient en silence, elles se voient maintenant.
+        if (h <= 0) {
+          ctx.strokeStyle = hexToRgba(r.color, Math.min(1, data.opacity + 0.62));
+          ctx.lineWidth = Math.max(1, Math.round((r.thickness ?? 3) * vr));
+          ctx.beginPath();
+          ctx.moveTo(x1, yTop + 0.5);
+          ctx.lineTo(x2, yTop + 0.5);
+          ctx.stroke();
+
+          if (data.showLabel && r.label) {
+            ctx.fillStyle = hexToRgba(r.color, 1);
+            ctx.font = `${Math.round(10 * vr)}px Inter, system-ui, sans-serif`;
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(r.label, x1 + Math.round(4 * hr), yTop - Math.round(3 * vr));
+          }
+          continue;
+        }
 
         const baseAlpha = r.state === 'mitigated' ? data.opacity * 0.45 : data.opacity;
 
@@ -160,6 +191,8 @@ class FvgPaneView {
         state: z.state,
         label: zoneLabel(z, opts),
         level,
+        // Épaisseur du trait, quand la zone est plate. Ignorée sinon.
+        thickness: z.thickness,
       });
     }
 

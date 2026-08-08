@@ -134,6 +134,136 @@ discuter l'origine de `time_bucket` :
 Les lignes dont la source est vide sortent **avant** l'agrégation : sinon elles
 créeraient des bougies vides aux mêmes horodatages que les vraies.
 
+## Indicateurs : SMA et swings
+
+Les deux viennent de [`lib/indicators.js`](../lib/indicators.js), le module du
+graphe principal — `calcMA` et `calcSwings`, sans copie ni variante. Un swing
+doit vouloir dire la même chose partout, sinon deux vues du même marché se
+contredisent.
+
+Ces fonctions parlent **bougies** : `{ time, open, high, low, close }`. En mode
+agrégé, les lignes en sont déjà. En mode tick, l'effet de données leur en
+fabrique dans le même parcours que le tracé : **un tick est une bougie sans
+durée**, donc `open = high = low = close = son prix`, et l'abscisse est le rang.
+
+Ce n'est pas un habillage — c'est ce qui leur donne le sens attendu au tick :
+
+- **SMA(20) = moyenne des 20 derniers TICKS**, pas des 20 dernières secondes.
+  Sa portée en temps se dilate quand le marché s'endort. C'est la lecture juste
+  sur un graphe dont l'abscisse est l'activité et non l'horloge — mais c'est à
+  savoir avant de comparer une SMA au tick et une SMA en M1.
+- **Swing = tick strictement plus haut (ou plus bas) que ses N voisins de chaque
+  côté.** Sur un palier de prix identiques il n'y a aucun pivot, et il n'en est
+  signalé aucun. Au tick, 5/5 marque beaucoup ; 8 à 15 se lit mieux.
+
+Les deux se règlent dans le panneau **Indicateurs** de la barre d'outils : les
+périodes des moyennes en une ligne (« 20, 50, 200 »), quatre au plus. Ce sont
+des réglages qu'on pose puis qu'on oublie — les garder en ligne, c'était six
+contrôles à enjamber pour atteindre le seul qu'on touche sans arrêt, le pas de
+temps. Rien n'est caché pour autant : le bouton porte le compte de ce qui est
+actif, et les courbes s'annoncent elles-mêmes sur l'échelle des prix.
+
+### Le piège qui a coûté une heure
+
+Les séries d'indicateurs sont tenues dans des refs (`maMapRef`, `swingRef`).
+React remonte le composant en développement, et **ces refs survivaient au
+remontage** : la table croyait ses séries encore vivantes, ne les recréait donc
+pas sur le nouveau graphe, et continuait de les alimenter dans le vide. Aucune
+erreur, aucune trace dans la console — juste des indicateurs qui ne s'affichent
+jamais. Le nettoyage du graphe vide désormais cette comptabilité ; toute
+nouvelle série mémorisée dans une ref doit y être ajoutée.
+
+## Zones de support et de résistance
+
+Bouton **Zones** dans la barre : le glissement vertical sur le graphe trace une
+bande. Clic sur une zone (hors mode tracé) pour la sélectionner ; `Suppr`
+l'efface, `Échap` désélectionne.
+
+### Une bande de prix, pas une boîte
+
+Une zone n'a que deux nombres : `top` et `bottom`. Pas de bornes temporelles, et
+c'est délibéré.
+
+Un support est un **prix** auquel le marché a réagi. Sa largeur à l'écran n'est
+pas une donnée — elle ne dit rien de plus que « je l'ai tracé ici ». Ce qui
+compte est de le revoir quand le prix y revient, donc à **droite**, précisément
+là où une boîte fermée s'arrêterait.
+
+Le mode tick tranche définitivement : son abscisse est un rang, pas une date. Un
+rang ne survit ni au changement de pas de temps ni au rechargement. Une zone
+bornée dans le temps serait donc soit fausse, soit invisible dès qu'on change de
+vue — deux façons de perdre le repère qu'on avait pris la peine de poser.
+
+Conséquence directe et vérifiée : une zone tracée au tick reste en place en 5 s,
+en M1, et après rechargement.
+
+### Support ou résistance
+
+Ce n'est pas une propriété de la zone, c'est sa position **par rapport au
+prix** : sous le marché elle porte, au-dessus elle plafonne. Le sens est donc
+deviné à la création (et l'aperçu se colore déjà pendant le tracé), puis
+l'utilisateur peut le retourner — un support cassé devient une résistance, et
+c'est à lui de dire quand, pas au programme de le redevenir en continu.
+
+Rangées par symbole (`grapher.ticker.zones.<symbolId>`) : un support de l'or n'a
+aucun sens sur le BTC.
+
+### Le piège : l'effet de bord dans un updater d'état
+
+La création se faisait d'abord dans le `setDraft(d => …)` du relâchement. React
+peut **rejouer un updater** — il le fait systématiquement en développement — et
+l'effet de bord partait alors deux fois : deux zones identiques superposées,
+invisibles à l'œil, avec un compteur qui affichait le double. Un updater doit
+rester une fonction pure ; la création vit maintenant en dehors, et lit le tracé
+dans une ref tenue à jour de façon synchrone par les gestionnaires de pointeur.
+
+## FVG et iFVG
+
+Panneau **Indicateurs › Imbalances**. Détection dans
+[`lib/ticker/fvg.js`](../lib/ticker/fvg.js), rendu par la même primitive que les
+zones tracées mais dans une instance séparée — ce que la machine trouve ne doit
+pas se confondre avec ce qu'on a décidé soi-même (cadre en pointillés,
+étiquette, et pas de sélection).
+
+**FVG** — trois bougies `a · b · c`. L'impulsion `b` va si vite que les mèches
+de `a` et de `c` ne se recouvrent pas :
+
+```
+haussier : c.low  > a.high   →  boîte [a.high, c.low]
+baissier : c.high < a.low    →  boîte [c.high, a.low]
+```
+
+Même inégalité que `lib/xfvg/detect.js` (le gap haussier y vaut `c.low - a.high`) :
+deux vues du même marché ne doivent pas se contredire sur la définition du motif.
+
+**iFVG** — un FVG traversé change de camp. Un FVG haussier dont une bougie
+**CLÔTURE** sous son bord bas devient une zone de résistance. La clôture et pas
+la mèche : une mèche qui dépasse est un test, une clôture est une décision —
+prendre la mèche ferait basculer le motif au premier balayage de liquidité,
+c'est-à-dire exactement quand il ne faut pas.
+
+Un motif inversé produit **deux boîtes** : le FVG coupé à l'instant de
+l'inversion, puis l'iFVG qui prend la suite avec son propre étirement. C'est son
+histoire qui se lit sur le graphe.
+
+### Pas au tick
+
+Un FVG est un trou entre deux mèches. Au tick, `open = high = low = close` : la
+règle dégénère en « le prix a monté depuis deux ticks », vrai une fois sur deux
+et sans aucun sens. La détection ne tourne donc que sur les pas agrégés, et le
+panneau le dit au lieu d'afficher zéro motif sans raison apparente.
+
+### Deux plafonds, tous deux pour la LECTURE
+
+- **étirement** (10 bougies par défaut) — au-delà, la zone barre le graphe et
+  prétend valoir encore alors que le marché est passé à autre chose. Même
+  intention que l'`extLen` du xFVG.
+- **garder** (12 motifs) — sans plafond, une centaine de boîtes se recouvrent et
+  le graphe ne montre plus rien. On garde les plus récents.
+
+L'étiquette ne s'écrit que si la boîte a la place de la porter : forcée dans un
+rectangle trop petit, elle déborde sur ses voisines.
+
 ## Volumétrie
 
 Aucune purge : les ticks sont gardés indéfiniment (décision du 04/08/2026).

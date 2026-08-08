@@ -6,9 +6,12 @@ import { LIQ_DEFAULTS,  FIELDS as LIQ_FIELDS  } from '../lib/liq/params';
 import { REV_DEFAULTS,  FIELDS as REV_FIELDS  } from '../lib/rev/params';
 import { RINGBLE_DEFAULTS, FIELDS as RINGBLE_FIELDS } from '../lib/ringble/params';
 import { SUPER_AVAL_DEFAULTS, FIELDS as SUPER_AVAL_FIELDS } from '../lib/superAval/params';
+import { CORNE_DEFAULTS, FIELDS as CORNE_FIELDS } from '../lib/corne/params';
+import { IMPULSE_DEFAULTS, FIELDS as IMPULSE_FIELDS } from '../lib/impulse/params';
 import { RSIER_DEFAULTS, FIELDS as RSIER_FIELDS } from '../lib/rsier/params';
 import { TRENDER_DEFAULTS, FIELDS as TRENDER_FIELDS } from '../lib/trender/params';
 import { TWINS_DEFAULTS, FIELDS as TWINS_FIELDS } from '../lib/twins/params';
+import { DOLLARS_DEFAULTS, FIELDS as DOLLARS_FIELDS } from '../lib/dollars/params';
 
 const COLORS = [
   '#26A69A', '#EF5350', '#60A5FA', '#F59E0B',
@@ -99,6 +102,23 @@ export const PATTERN_TYPES = [
     dueMode:       'full',
   },
   {
+    // $$$ — deux imbalances de sens CONTRAIRES et emboîtées : la 3e bougie de la
+    // première est la 1re de la seconde, la figure tient sur cinq bougies. Taillé
+    // dans le rFVG le 06/08/2026, mais sans une seule de ses moyennes mobiles :
+    // ni familles à classer, ni filtres qui en vivaient. L'appariement, lui,
+    // n'est plus une option — c'est la définition du motif.
+    // Une zone, et rien d'autre : pas de mode « position ». La gestion viendra
+    // d'ailleurs et n'a pas à se réinventer ici.
+    // Ses réglages vivent dans lib/dollars/params.js — c'est là qu'on ajoute une
+    // condition, pas ici. Ce bloc ne porte que l'identité.
+    type:   'DOLLARS',
+    label:  '$$$',
+    desc:   'Deux imbalances opposées et emboîtées (3e bougie de l’une = 1re de l’autre) — une pointe',
+    color:  '#A3E635',
+    render: 'zone',
+    ...DOLLARS_DEFAULTS,
+  },
+  {
     // xFVG — deux figures sous un même interrupteur, choisies par le réglage
     // `mode` : l'imbalance 3 bougies (le motif nu de la famille rFVG) ou le
     // retournement contra-MM en 2 bougies. Ni sous-familles (rFVG / superFVG),
@@ -176,6 +196,37 @@ export const PATTERN_TYPES = [
     desc:   'Une bougie qui avale entièrement les N bougies situées derrière la bougie opposée',
     color:  '#22D3EE',
     ...SUPER_AVAL_DEFAULTS,
+  },
+  {
+    // corne — le seul motif de la famille qui ne se lise pas dans les bougies :
+    // c'est une figure du RSI (période 7), une montée lente terminée en pointe
+    // puis un effondrement d'une ou deux bougies qui repasse sous des valeurs
+    // vieilles de plusieurs dizaines de bougies. Le repère se pose sur la bougie
+    // où la chute est accomplie — jamais sur la pointe, qui ne se connaît
+    // qu'après coup. Un repère, pas de zone ni de position.
+    // Les mesures vivent dans lib/rsi/features.js (partagées avec le laboratoire
+    // de la page /rsi), les réglages dans lib/corne/params.js. Ce bloc ne porte
+    // que l'identité.
+    type:   'CORNE',
+    label:  'corne',
+    desc:   'Le RSI monte longuement, fait une pointe, puis s’effondre en une ou deux bougies',
+    color:  '#FBBF24',
+    ...CORNE_DEFAULTS,
+  },
+  {
+    // impulse — une VAGUE encadrée : N bougies du même sens à la file. La boîte
+    // prend en hauteur la 1re et la dernière bougie de la vague, s'arrête à
+    // droite sur la dernière, et remonte à gauche de `back` périodes AVANT la
+    // première — c'est ce prolongement en arrière qui en fait une zone plutôt
+    // qu'un simple surlignage du mouvement. Une zone, pas de position. Ses
+    // réglages vivent dans lib/impulse/params.js — c'est là qu'on ajoute une
+    // condition, pas ici. Ce bloc ne porte que l'identité.
+    type:   'IMPULSE',
+    label:  'impulse',
+    desc:   'N bougies du même sens à la file — encadrées, avec un prolongement en arrière',
+    color:  '#60A5FA',
+    render: 'zone',
+    ...IMPULSE_DEFAULTS,
   },
   {
     // RSIER — les surzones du RSI d'une unité de temps SUPÉRIEURE, marquées sur
@@ -797,6 +848,57 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
           </div>
         )}
 
+        {/* $$$ — aucun champ écrit ici : tout vient de lib/dollars/params.js. */}
+        {editingType === 'DOLLARS' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>deux imbalances opposées, emboîtées</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={DOLLARS_FIELDS} form={form} defaults={DOLLARS_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {/* corne — aucun champ écrit ici : tout vient de lib/corne/params.js. */}
+        {editingType === 'CORNE' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>une figure du RSI — montée lente, pointe, effondrement</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={CORNE_FIELDS} form={form} defaults={CORNE_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
+        {/* impulse — aucun champ écrit ici : tout vient de lib/impulse/params.js. */}
+        {editingType === 'IMPULSE' && (
+          <div className={styles.formSection}>
+            <div className={styles.formHeader}>
+              <span className={styles.formTitle} style={{ color: editingMeta?.color }}>
+                {editingMeta?.label}
+              </span>
+              <span className={styles.formSubtitle}>N bougies du même sens, encadrées</span>
+              <button className={styles.formCloseBtn} onClick={() => setEditingType(null)}>×</button>
+            </div>
+
+            <SchemaForm fields={IMPULSE_FIELDS} form={form} defaults={IMPULSE_DEFAULTS} setF={setF} />
+
+            <button className={styles.saveBtn} onClick={save}>✓ Enregistrer</button>
+          </div>
+        )}
+
         {/* RSIER — aucun champ écrit ici : tout vient de lib/rsier/params.js. */}
         {editingType === 'RSIER' && (
           <div className={styles.formSection}>
@@ -853,6 +955,7 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
                   { value: 'rfvg',  label: 'Seuls les rFVG' },
                   { value: 'all',   label: 'Toutes (aFVG)' },
                   { value: 'super', label: 'superFVG' },
+                  { value: 'cfvg',  label: 'cFVG' },
                 ].map(o => (
                   <button
                     key={o.value}
@@ -872,6 +975,11 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
               <b> superFVG</b> : sous-ensemble des rFVG dont la 3e bougie (celle qui referme le gap)
               clôture à contre-sens du motif — rFVG haussier + 3e bougie baissière, ou rFVG baissier
               + 3e bougie haussière.
+              <b> cFVG</b> : l'exact contraire du rFVG — la <b>continuation</b>. Seule la <b>MM lente</b>
+              est regardée (la rapide ne sert pas), et la centrale doit être du côté de son propre
+              sens : haussière entièrement au-dessus de la MM lente, baissière entièrement en dessous.
+              Ce sont les aFVG qui vont dans le sens de la tendance longue, jamais les mêmes que
+              ceux du mode rFVG.
             </p>
 
             <div className={styles.field}>
@@ -989,7 +1097,9 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
               La bougie doit être entièrement d'un côté des DEUX moyennes à la fois : son plus bas
               au-dessus de la MM rapide ET de la MM lente (baissier), son plus haut en dessous des
               deux (haussier). Elle ne touche jamais aucune des deux. En mode « Toutes », les MM ne
-              filtrent plus rien mais servent encore à étiqueter les zones.
+              filtrent plus rien mais servent encore à étiqueter les zones. En mode « cFVG », seule
+              la MM lente compte, et dans l'autre sens : haussière au-dessus, baissière en dessous —
+              la MM rapide est ignorée.
             </p>
 
             <div className={styles.field}>
@@ -1005,7 +1115,8 @@ export default function PatternPanel({ patterns, onChange, onClose }) {
               Desserre la MM LENTE, et elle seule : seule l'OUVERTURE de la centrale doit être du bon
               côté — au-dessus si baissière, en dessous si haussière — sa clôture a le droit d'être de
               l'autre. La bougie traverse alors la MM lente au lieu de rester à distance. La MM rapide
-              reste jugée mèche comprise.
+              reste jugée mèche comprise. En mode « cFVG » le desserrage vaut aussi, dans son sens à
+              lui : ouverture au-dessus si haussière, en dessous si baissière.
             </p>
 
             <div className={styles.field}>

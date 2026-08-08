@@ -48,6 +48,7 @@ const CASES = [
   { nom: 'cooldown après TP',      exit: { slMarginPts: 2, tpPts: 200, uniqueTrade: true, skipAfterTp: 2 } },
   { nom: 'mode all (aFVG inclus)', detect: { mode: 'all' }, exit: { slMarginPts: 2, tpPts: 150 } },
   { nom: 'mode super',             detect: { mode: 'super' }, exit: { slMarginPts: 2, tpPts: 150 } },
+  { nom: 'mode cfvg (continuation)', detect: { mode: 'cfvg' }, exit: { slMarginPts: 2, tpPts: 150 } },
   // SL plafonné : serré (il décide presque partout, et coupe dès B4), large (il
   // ne décide jamais, la structure reste maîtresse), et croisé avec les BE — le
   // stop déplacé doit rester borné par le plafond, pas par le seul structurel.

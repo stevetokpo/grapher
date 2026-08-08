@@ -38,6 +38,34 @@ export function useTicks(symbolId, resId, src, { limit = 0, pinnedTo = null } = 
 
   const isTick = isTickResolution(resId);
 
+  // ── Purge SYNCHRONE au changement de vue ────────────────────────────────
+  // Vider les lignes dans un effet ne suffit pas : l'effet ne tourne qu'APRÈS
+  // le rendu, et ce rendu-là associe déjà le nouveau pas de temps aux lignes de
+  // l'ANCIEN. Le graphe reçoit alors des ticks bruts en croyant tenir des
+  // bougies, cherche un champ `time` absent, et lightweight-charts échoue sur
+  // « Cannot read properties of undefined (reading 'year') » — il tentait de
+  // lire un undefined comme une date.
+  //
+  // Corriger côté graphe ne ferait que déplacer le problème : la page lit les
+  // mêmes lignes pour son prix et ses décimales, et afficherait NaN. La seule
+  // réponse juste est que ce rendu n'existe pas. React le permet : une mise à
+  // jour d'état PENDANT le rendu du même composant relance le rendu avant tout
+  // affichage, donc aucune image incohérente n'est jamais montrée.
+  const viewKey = `${symbolId}|${resId}|${src}|${limit}|${pinnedTo ?? 'live'}`;
+  const [renderedKey, setRenderedKey] = useState(viewKey);
+  if (renderedKey !== viewKey) {
+    setRenderedKey(viewKey);
+    setRows([]);
+    rowsRef.current = [];
+    setHasMore(true);
+    hasMoreRef.current = true;
+    setError(null);
+    // Le chargement commence ICI, pas dans l'effet : sans ça, l'image qui suit
+    // montre zéro ligne sans chargement en cours, c'est-à-dire l'écran « aucun
+    // tick, installez l'expert » — un conseil faux, le temps d'un battement.
+    setLoading(symbolId != null);
+  }
+
   const baseUrl = useCallback((over = {}) => {
     const a = { ...argsRef.current, ...over };
     const p = new URLSearchParams({ symbolId: String(a.symbolId), res: a.resId, src: a.src });

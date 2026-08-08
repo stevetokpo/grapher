@@ -88,7 +88,7 @@ pts : 1 position sur 141. Sur un TP serré ou un TF haut, ce sera davantage.
 **Parité garantie par un test, pas par la relecture.** `scripts/rfvg-parity.mjs`
 rejoue 40 configurations (chaque branche de la machine à états : les quatre
 break-even, leurs cumuls, le trade unique, le cooldown, le SL plafonné, le dû
-sous ses deux modes, les trois modes de détection) et compare position par
+sous ses deux modes, les quatre modes de détection) et compare position par
 position `simulatePositions(fills:'bar')` à `calcRFVGPositions`, compteurs de lot
 compris. Vérifié identique sur XAUUSD 5m et Volatility 75 15m. Le
 jour où les deux divergeront, on le saura par ce script — pas six semaines plus

@@ -170,9 +170,165 @@
   box-shadow: 0 0 8px var(--sw);
 }
 
+/* ── Barre du labo ───────────────────────────────────────────────
+   Deuxième rangée : tout ce qui sert à RECONNAÎTRE, séparé de ce qui sert
+   à afficher. Elle s'enroule sur les petits écrans plutôt que de pousser
+   les seuils hors de vue. */
+.labBar {
+  padding: 6px 20px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 3px;
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(10, 13, 21, 0.45);
+  flex-shrink: 0;
+  min-height: 38px;
+}
+
+.modeGroup {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.modeBtn {
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--ease), background var(--ease), border-color var(--ease);
+}
+.modeBtn:hover { color: var(--text-muted); background: rgba(255,255,255,0.05); }
+.modeBtnActive {
+  color: #FBBF24;
+  background: rgba(251,191,36,0.12);
+  border-color: rgba(251,191,36,0.40);
+  font-weight: 700;
+}
+
+.labelBtn {
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--ease), background var(--ease), border-color var(--ease);
+}
+.labelBtn:hover { color: var(--text-muted); background: rgba(255,255,255,0.05); }
+.labelBtnOui {
+  color: #34D399;
+  background: rgba(52,211,153,0.12);
+  border-color: rgba(52,211,153,0.42);
+  font-weight: 700;
+}
+.labelBtnNon {
+  color: #EF5350;
+  background: var(--bear-bg-2);
+  border-color: var(--bear-ring);
+  font-weight: 700;
+}
+
+.numInputSm {
+  width: 46px;
+  background: rgba(9, 12, 22, 0.70);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 2px 5px;
+  outline: none;
+  text-align: center;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.numInputSm:hover { border-color: var(--border-2); }
+.numInputSm:focus {
+  border-color: rgba(251,191,36,0.50);
+  box-shadow: 0 0 0 2px rgba(251,191,36,0.10);
+}
+.numInputSm::-webkit-inner-spin-button,
+.numInputSm::-webkit-outer-spin-button { opacity: 0; }
+
+.select {
+  background: rgba(9, 12, 22, 0.70);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 3px 6px;
+  outline: none;
+  cursor: pointer;
+}
+.select:hover { border-color: var(--border-2); }
+
+.preset {
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  border: 1px dashed rgba(251,191,36,0.45);
+  background: transparent;
+  color: #FBBF24;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background var(--ease);
+}
+.preset:hover { background: rgba(251,191,36,0.12); }
+
+.toggle {
+  padding: 4px 11px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--ease), background var(--ease), border-color var(--ease);
+}
+.toggle:hover { color: var(--text-muted); background: rgba(255,255,255,0.05); }
+.toggleOn {
+  color: #FBBF24;
+  background: rgba(251,191,36,0.10);
+  border-color: rgba(251,191,36,0.38);
+}
+
+.msg {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-right: 8px;
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Zone de travail : graphe + panneau ──────────────────────────── */
+.workArea {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* ── Chart area ──────────────────────────────────────────────────── */
 .chartArea {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   position: relative;
 }

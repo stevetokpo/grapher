@@ -37,8 +37,10 @@ n'a qu'un seul endroit — `fmtUsd()` dans `lib/format.js`, alimenté par
 | `lib/scripts/engine.js` | Le déroulé bougie par bougie, les remplissages, les SL/TP, l'API remise au script |
 | `lib/scripts/report.js` | Les statistiques du run et le document JSON téléchargeable |
 | `lib/scripts/registry.js` | Le registre — un script s'y ajoute en une ligne |
+| `lib/scripts/lotLadder.js` | L'escalier des lots — la taille qui monte avec le compte, et son formulaire |
 | `lib/scripts/library/*.js` | Les scripts eux-mêmes |
 | `lib/scripts/library/ringble.js` | Joue le motif ringble **du graphe** — voir « Un script qui joue un motif » |
+| `lib/scripts/library/rfvgPaliers.js` | Joue le rFVG **du graphe**, sorties du moteur commun, taille par escalier |
 | `components/ScriptPanel.js` | Le tiroir : choix du script, compte, date de départ, réglages, lancement |
 | `components/scripts/ScriptResults.js` | Le relevé de compte |
 
@@ -112,10 +114,61 @@ pas ce qui a été joué — et le panneau Patterns peut changer après le run.
 
 ### Grammaire des champs
 
-Même que `lib/xfvg/params.js` — `kind` : `number`, `toggle`, `segmented`,
-`row` (deux champs côte à côte), `divider` (titre de section), `hint`
-(paragraphe d'explication). Tout champ accepte `when: p => …` pour n'apparaître
-que sous condition.
+Même que `lib/xfvg/params.js` — `kind` : `number`, `text` (chaîne libre, avec
+`placeholder`), `toggle`, `segmented`, `row` (deux champs côte à côte),
+`divider` (titre de section), `hint` (paragraphe d'explication). Tout champ
+accepte `when: p => …` pour n'apparaître que sous condition.
+
+Un champ `text` n'est validé nulle part : le registre le recopie tel quel, et
+c'est au script de savoir lire sa propre chaîne (une table de paliers, par
+exemple). Ce qu'il n'arrive pas à lire, il doit le **dire** — `api.log` est là
+pour ça, une ligne illisible avalée en silence est un run qui ment.
+
+---
+
+## L'escalier des lots
+
+`lib/scripts/lotLadder.js` répond à une seule question : **combien de lots, vu où
+en est le compte ?** Il ne touche à rien, ne connaît aucune stratégie, et
+s'ajoute à un script en deux lignes — `...ladderFields()` dans son `fields`,
+`createLotLadder(params, capital)` dans son `setup`.
+
+```js
+const ladder = createLotLadder(params, account.capital);
+const ref    = params.ladderRef === 'equite' ? account.equity : account.balance;
+api.buy({ lots: api.normalizeLots(ladder.lots(ref)), tpPts: 100 });
+```
+
+**Un escalier multiplie l'espérance, il ne la crée pas.** Sur une stratégie qui
+perd un demi-point par trade, il fait perdre plus vite, et l'accélération est
+exactement la même que dans l'autre sens. Il se branche donc **après** avoir
+montré qu'on gagne à lot fixe, jamais pour y arriver.
+
+| Mode | Le lot | La courbe |
+|---|---|---|
+| `fixe` | constant | droite — le seul mode qui se **lit** |
+| `proportionnel` | base × compte / capital | exponentielle, drawdown en % inchangé |
+| `paliers` + `plus` | +N lots tous les X USD | escalier arithmétique |
+| `table` | paliers écrits à la main (`2000:0.2, 5000:0.5`) | ce qu'on a décidé |
+| `paliers` + `fois` | ×F lots tous les X USD | **super-exponentielle — c'est celle qui ruine** |
+
+Deux réglages pèsent plus lourd que le mode lui-même :
+
+- **`ladderRef`** — `solde` ne compte que les positions fermées, `equite` inclut
+  le flottant. En équité, une position ouverte en gain monte le lot de la
+  suivante, et un retournement les emporte ensemble.
+- **`ladderDown`** — en `cliquet`, le lot ne redescend jamais. Le compte monte à
+  3000, prend le lot de ce palier, retombe à 2000, et continue d'y perdre à la
+  taille du palier 3000. C'est le réglage qui fabrique les plus beaux chiffres
+  et les plus mauvaises fins.
+
+Mesuré sur 7 900 positions, capital 1 000 USD, marge 100 USD/lot, **à stratégie
+gagnante identique** : lot fixe → ×11 avec 18 % de creux ; paliers `+0,05 / 1000`
+→ ×20 avec 67 % ; le même en cliquet → ×70 avec 91 % de creux et 6 stop outs ;
+et `×2 / 1000` en cliquet → **−92 %**, 45 stop outs et 7 236 ordres refusés faute
+de marge. Le dernier cas est le plus instructif : la stratégie n'a pas changé,
+c'est la taille qui a mangé le compte, et le refus d'ordre a fini par choisir les
+trades à sa place.
 
 ---
 

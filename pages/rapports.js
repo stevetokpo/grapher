@@ -235,14 +235,58 @@ export default function RapportsPage() {
     if (!report) return null;
     const pos    = report.positions;
     const params = report.params ?? {};
-    const tpPts  = params.tpPts ?? 0;
 
-    const s = computeStats(pos, { tpPts, riskFallback: params.slPts ?? 0 });
-    const beOn = (params.beTriggerPts ?? 0) > 0 || s.be > 0;
+    // L'OBJECTIF N'EST PAS LU DANS LES RÉGLAGES. Il l'était (`params.tpPts`), et
+    // ça mentait dès qu'il variait : un TP réglé en ATR laisse `tpMode` sur
+    // 'points' et un `tpPts` inutilisé dans les réglages, un dû armé remplace la
+    // cible, le TP dynamique la repousse. computeStats prend donc la MÉDIANE de
+    // ce que les positions ont réellement visé — c'est elle qui sert au RR médian
+    // comme à la grille de l'étude break-even. `params.tpPts` ne reste qu'un
+    // repli pour un rapport si ancien que ses positions n'ont pas de `tp`.
+    const anyTp = pos.some(p => p.tp != null && p.entryPrice != null);
+    const s = computeStats(pos, {
+      tpPts: anyTp ? 0 : (params.tpPts ?? 0),
+      riskFallback: params.slPts ?? 0,
+    });
+    const tpPts = s.tpPts;
+    // Un BE est « actif » soit parce qu'un réglage l'annonce, soit parce que des
+    // sorties BE existent. Les motifs n'ont pas le même réglage : seuil en points
+    // (rFVG), en R (famille liq), ou distance de retour du BE du malsain ($$$).
+    const beOn = (params.beTriggerPts ?? 0) > 0 || (params.beTriggerR ?? 0) > 0
+      || (params.beUnhealthyPts ?? 0) > 0 || (params.beUnhealthyAtr ?? 0) > 0
+      || s.be > 0;
     const byId = new Map(pos.map(p => [p.id, p]));
 
+    // COMBIEN DE POSITIONS ONT COURU EN MÊME TEMPS. La courbe additionne des
+    // résultats dans l'ordre des ENTRÉES ; tant que les positions ne se
+    // chevauchent pas, c'est exactement la suite des encaissements d'un compte.
+    // Dès qu'elles se chevauchent, ce n'en est plus une — et le creux maximal lu
+    // dessus n'est plus celui qu'un compte aurait subi. Ce chiffre dit si la
+    // réserve mord ou non, plutôt que de laisser le lecteur le deviner.
+    const spans = pos
+      .filter(p => p.entryTime != null && p.exitDate != null)
+      .map(p => ({ e: p.entryTime, x: Date.parse(p.exitDate) / 1000 }))
+      .sort((a, b) => a.e - b.e);
+    let maxSim = 0;
+    const ouvertes = [];
+    for (const sp of spans) {
+      while (ouvertes.length && ouvertes[0] < sp.e) ouvertes.shift();
+      ouvertes.push(sp.x);
+      ouvertes.sort((a, b) => a - b);
+      if (ouvertes.length > maxSim) maxSim = ouvertes.length;
+    }
+
+    // LA TAILLE DE POSITION VARIE-T-ELLE ? Tant qu'elle ne varie pas, tout ce
+    // qui suit se lit comme depuis toujours. Dès qu'elle varie, deux unités
+    // cohabitent dans cette page — le résultat du COMPTE (avec le lot) et celui
+    // de la STRATÉGIE (à 1 lot) — et il faut le dire, sans quoi on comparerait
+    // des chiffres qui ne parlent pas de la même chose.
+    const lots = pos.map(p => p.lot).filter(v => v != null);
+    const lotsVarient = lots.length > 0 && new Set(lots).size > 1;
+    const lotMax = lots.length ? Math.max(...lots) : 1;
+
     return {
-      ...s, pos, params, tpPts, beOn,
+      ...s, pos, params, tpPts, beOn, maxSim, lotsVarient, lotMax,
       // La page nommait ces champs autrement avant l'extraction ; on garde ses
       // noms côté rendu plutôt que de réécrire tout le JSX.
       beN: s.be, be: s.beThresh,
@@ -273,6 +317,9 @@ export default function RapportsPage() {
 
   const COLS = [
     ['id', '#'], ['direction', 'Dir'], ['status', 'Statut'], ['entryTime', 'Entrée'],
+    // La colonne Lot n'apparaît que si les tailles VARIENT : à lot fixe elle ne
+    // dirait que « 1 » sur toute la hauteur.
+    ...(d?.lotsVarient ? [['lot', 'Lot']] : []),
     ['risk0', 'Risque (pts)'], ['rr', 'RR'], ['barsHeld', 'Durée (bougies)'], ['entryTouches', "Retours sur l'entrée"],
     ['entryPrice', 'Prix entrée'], ['exitPrice', 'Prix sortie'],
     ['profitPoints', 'Profit brut (pts)'], ['netPoints', 'Profit net (pts)'],
@@ -323,7 +370,7 @@ export default function RapportsPage() {
             <path d="M17 8l-5-5-5 5" />
             <path d="M12 3v12" />
           </svg>
-          <span className={styles.dropTitle}>Dépose un rapport rFVG, KO ou liq</span>
+          <span className={styles.dropTitle}>Dépose un rapport de positions</span>
           <span className={styles.dropBody}>
             Glisse ici le fichier JSON téléchargé avec le bouton « Rapports » du graphe,
             ou clique pour le choisir. Tout est analysé localement, rien n'est envoyé.
@@ -338,6 +385,21 @@ export default function RapportsPage() {
               <span key={k} className={styles.chip}>{k} <b>{String(v)}</b></span>
             ))}
           </div>
+
+          {/* Taille de position variable : deux unités cohabitent alors dans la
+              page, et la confusion serait silencieuse sans ce bandeau. */}
+          {d.lotsVarient && (
+            <p className={styles.cardSub} style={{ marginTop: -4 }}>
+              <b style={{ color: AMBER }}>Taille de position variable</b> (jusqu'à <b>×{d.lotMax}</b>) :
+              deux unités cohabitent ci-dessous. <b>Points nets</b>, la <b>courbe cumulée</b> et le
+              {' '}<b>drawdown max</b> sont ceux du <b>compte</b>, lot compris — c'est ce qui a été
+              gagné. Le <b>gain moyen</b>, la <b>perte moyenne</b>, le <b>facteur de profit</b>,
+              {' '}l'<b>espérance</b>, le <b>seuil de rentabilité</b> et les <b>deux études</b> sont
+              ramenés à <b>1 lot</b> : ils jugent la stratégie, et les pondérer par le lot
+              reviendrait à les régler sur l'ordre dans lequel les trades sont tombés. Le total net
+              ne vaut donc plus l'espérance × le nombre de positions, et c'est normal.
+            </p>
+          )}
 
           {/* Cooldown : signaux sautés (hors rapport, juste comptés au calcul) */}
           {(report.stats?.skippedByCooldown ?? 0) > 0 && (
@@ -367,13 +429,21 @@ export default function RapportsPage() {
             <Tile label="Winrate" value={fmtPct(d.winrate)}
               color={d.winrate != null && d.be != null ? (d.winrate >= d.be ? BULL : BEAR) : undefined}
               sub={d.be != null ? `TP/(TP+SL) · seuil de rentabilité réalisé : ${fmtPct(d.be)}` : 'TP/(TP+SL)'} />
+            {/* Le TP affiché est la MÉDIANE de ce que les positions ont visé, pas
+                le réglage : les deux coïncident à objectif fixe et divergent dès
+                qu'il varie (TP en ATR, dû armé, cible repoussée). */}
             <Tile label="Risque médian" value={d.riskMed != null ? `${fmtNum(d.riskMed, 1)} pts` : '—'}
               sub={d.risks.length
-                ? `TP ${d.tpPts} pts · étendue ${fmtNum(d.risks[0], 1)} → ${fmtNum(d.risks[d.risks.length - 1], 1)} pts`
-                : `TP ${d.tpPts} pts · SL structurel`} />
+                ? `TP médian ${fmtNum(d.tpPts, 1)} pts · risque de ${fmtNum(d.risks[0], 1)} à ${fmtNum(d.risks[d.risks.length - 1], 1)} pts`
+                : `TP médian ${fmtNum(d.tpPts, 1)} pts`} />
+            {/* Le spread n'est PAS supposé nul : le simulateur l'applique
+                position par position et le rapport porte le net. La tuile disait
+                « spread 0 » alors qu'elle affichait déjà du net — elle dit
+                maintenant ce que le rapport contient. */}
             <Tile label="Espérance" value={fmtP(d.expPts)}
               color={d.expPts != null ? (d.expPts >= 0 ? BULL : BEAR) : undefined}
-              sub={`par position résolue${d.beOn ? ', BE incl.' : ''}, spread 0`} />
+              sub={`par position résolue${d.beOn ? ', BE incl.' : ''} · net`
+                + ((d.params.spreadPts ?? 0) > 0 ? `, spread ${d.params.spreadPts} pts` : ', spread 0')} />
           </div>
 
           {/* Performance — tout en points : le lot est fixe */}
@@ -419,7 +489,22 @@ export default function RapportsPage() {
           {/* Courbe de points cumulés */}
           <section className={styles.card}>
             <h2 className={styles.cardTitle}>Points cumulés</h2>
-            <p className={styles.cardSub}>Somme des profits en points des positions résolues, dans l'ordre chronologique d'entrée. Lot fixe : chaque point pèse pareil, quel que soit le risque de la position.</p>
+            <p className={styles.cardSub}>
+              Somme des profits <b>nets</b> en points des positions résolues (TP, SL, BE et sorties
+              en durée), dans l'ordre chronologique d'<b>entrée</b>. Le spread est déjà déduit :
+              c'est le net qui est tracé, pas le brut. Lot fixe : chaque point pèse pareil, quel que
+              soit le risque de la position.
+              {d.maxSim > 1 ? (
+                <> <b style={{ color: AMBER }}>Jusqu'à {d.maxSim} positions ont couru en même temps</b> :
+                {' '}la courbe additionne donc des trades simultanés en les rangeant à leur date
+                d'entrée, ce qui n'est pas la suite des encaissements d'un compte. Le
+                {' '}<b>drawdown max</b> lu ici est à ce titre <b>optimiste</b> — un compte unique
+                aurait porté ces pertes ensemble.</>
+              ) : (
+                <> Aucune position n'en a chevauché une autre : la courbe est bien la suite des
+                encaissements d'un compte unique.</>
+              )}
+            </p>
             <EquityChart points={d.equity} />
           </section>
 
@@ -460,10 +545,16 @@ export default function RapportsPage() {
                 {d.beOn && (
                   <> <b style={{ color: AMBER }}>Ce rapport a déjà un BE appliqué</b>
                   {' '}({[
-                    (d.params.beTriggerPts ?? 0) > 0 && `profit ${d.params.beTriggerPts} pts`,
+                    (d.params.beTriggerPts ?? 0) > 0 && `profit ${d.params.beTriggerPts} pts, niveau ${d.params.beLevelPts ?? 0} pts`,
+                    (d.params.beTriggerR ?? 0) > 0 && `profit ${d.params.beTriggerR} R, niveau ${d.params.beLevelR ?? 0} R`,
                     (d.params.beTouchTrigger ?? 0) > 0 && `coupe à ${d.params.beTouchTrigger} retour(s)`,
                     (d.params.beBarsTrigger ?? 0) > 0 && `${d.params.beBarsTrigger} bougies`,
-                  ].filter(Boolean).join(', ') || 'seuil inconnu'}, niveau {d.params.beLevelPts ?? 0} pts) :
+                    // Le BE du malsain ($$$) n'est pas un stop remonté mais une
+                    // cible abaissée : le nommer autrement le ferait passer pour
+                    // ce que l'étude ci-dessous simule, ce qu'il n'est pas.
+                    (d.params.beUnhealthyPts ?? 0) > 0 && `BE du malsain, sortie à +${d.params.beUnhealthyPts} pts`,
+                    (d.params.beUnhealthyAtr ?? 0) > 0 && `BE du malsain, sortie à +${d.params.beUnhealthyAtr} × ATR`,
+                  ].filter(Boolean).join(', ') || 'réglage non reconnu'}) :
                   les études ne portent que sur les positions TP/SL restantes, les sorties BE en
                   sont exclues.</>
                 )}
@@ -512,12 +603,14 @@ export default function RapportsPage() {
           </div>
 
           <p className={styles.caveat}>
-            Mesures en échantillon, à spread nul, avec SL prioritaire dans la bougie. Tout est
-            compté en POINTS : le lot étant fixe, c'est lui qui est proportionnel au gain réel —
+            Mesures en échantillon, avec SL prioritaire dans la bougie. Le spread est celui du
+            rapport, déjà déduit position par position : tout ce qui est affiché est du NET. Tout
+            est compté en POINTS : le lot étant fixe, c'est lui qui est proportionnel au gain réel —
             compter en R supposerait qu'on redimensionne la position à chaque trade pour risquer
-            le même montant. Le risque en points varie fortement d'une position à l'autre (stop
-            structurel) : la tuile « Risque médian » en donne l'étendue, et le seuil de
-            rentabilité affiché est celui effectivement réalisé, tiré des gains et pertes moyens.
+            le même montant. Selon le motif, le risque est constant (stop en points) ou variable
+            (stop structurel, stop en ATR) : la tuile « Risque médian » en donne l'étendue, et le
+            seuil de rentabilité affiché est celui effectivement réalisé, tiré des gains et pertes
+            moyens — jamais un 1/(1+RR), qui n'aurait de sens qu'à risque constant.
             Les deux études sont des bornes construites sur des
             excursions globales par position — l'ordre intra-vie des excursions est inconnu à
             la granularité bougie. Une piste qui ressort ici doit être rejouée dans le module
@@ -570,6 +663,11 @@ export default function RapportsPage() {
                           </span>
                         </td>
                         <td>{fmtDate(p.entryDate)}</td>
+                        {d.lotsVarient && (
+                          <td style={{ color: (p.lot ?? 1) > 1 ? AMBER : undefined, fontWeight: (p.lot ?? 1) > 1 ? 700 : undefined }}>
+                            {p.lot == null ? '—' : `×${p.lot}`}
+                          </td>
+                        )}
                         <td>{p.risk0 != null ? fmtNum(p.risk0) : '—'}</td>
                         <td>{p.rr != null ? fmtNum(p.rr) : '—'}</td>
                         <td>{p.barsHeld ?? '—'}</td>

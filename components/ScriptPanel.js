@@ -102,6 +102,18 @@ function SchemaField({ field, form, defaults, setF }) {
         </button>
       )}
 
+      {/* Texte libre — une liste de paliers se tape, elle ne se règle pas au
+          pas de 0,01. Rendu tel quel : c'est au script de savoir le lire. */}
+      {kind === 'text' && (
+        <input
+          type="text"
+          className={styles.numInput}
+          value={value ?? ''}
+          placeholder={field.placeholder ?? ''}
+          onChange={e => setF({ [key]: e.target.value })}
+        />
+      )}
+
       {kind === 'segmented' && (
         <div className={styles.segmented}>
           {field.options.map(o => (

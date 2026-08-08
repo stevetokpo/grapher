@@ -1,6 +1,11 @@
 /* Page /ticker — vue au tick.
    Trois bandes fixes (entête, réglages, état) et une seule zone qui respire :
-   le graphe. C'est lui qu'on regarde, tout le reste doit savoir se taire. */
+   le graphe. Tout le reste est calibré pour ne pas lui prendre de hauteur —
+   d'où les indicateurs dans un panneau, et la lecture posée SUR les bougies
+   plutôt qu'au-dessus.
+
+   Échelle d'espacement : 4 / 6 / 8 / 12 / 16. Rien entre les deux.
+   Échelle de texte    : 9 / 10 / 11 / 12 / 13 / 26.                        */
 
 .shell {
   display: flex;
@@ -11,93 +16,479 @@
   overflow: hidden;
 }
 
+/* Les chiffres qui bougent en direct doivent occuper une largeur FIXE, sinon
+   la ligne entière frémit à chaque tick. C'est le détail qui sépare un
+   afficheur de marché d'un tableau de bord quelconque. */
+.shell :is(.readPrice, .statValue, .metric, .readStamp, .numInput, .textInput) {
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Barre de réglages ─────────────────────────────────────────────────── */
 .bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 8px 14px;
+  padding: 8px 12px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
 
-.barLabel {
-  font: 600 9px/1 var(--font);
-  letter-spacing: 0.11em;
-  color: var(--text-dim);
-  text-transform: uppercase;
+/* Un groupe = une étiquette et ses contrôles sur un MÊME fond. Le lien se voit
+   avant d'être lu, ce qu'aucun trait de séparation ne sait faire. */
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 3px 3px 10px;
+  background: rgba(255, 255, 255, 0.022);
+  border: 1px solid var(--border);
+  border-radius: 9px;
 }
 
-.segment {
+.groupLabel {
+  font: 600 9px/1 var(--font);
+  letter-spacing: 0.13em;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.seg {
   display: flex;
-  gap: 2px;
-  padding: 2px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  gap: 1px;
 }
 
 .segBtn {
-  padding: 5px 10px;
+  padding: 5px 9px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
   font: 500 11px/1 var(--font-mono);
-  letter-spacing: 0.02em;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.segBtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+.segBtn:hover:not(:disabled):not(.segBtnOn) {
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
 }
 
-.segBtnOn,
-.segBtnOn:hover {
+.segBtnOn {
   background: var(--blue);
   color: #06121f;
   font-weight: 600;
 }
 
-/* Le pas « tick » n'est pas un pas de temps comme les autres : il ne moyenne
-   rien. Sa lettre le rappelle avant qu'on clique. */
+/* Le tick n'agrège rien : il n'appartient pas à la série des durées. Un cran
+   d'écart et une bordure suffisent à le dire, sans une ligne de texte. */
 .segBtnTick {
-  letter-spacing: 0.08em;
+  margin-right: 7px;
+  letter-spacing: 0.06em;
   font-weight: 600;
+  position: relative;
+}
+
+.segBtnTick::after {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: 20%;
+  height: 60%;
+  width: 1px;
+  background: var(--border-2);
 }
 
 .segBtn:disabled {
-  opacity: 0.32;
+  opacity: 0.3;
   cursor: not-allowed;
-}
-
-.sep {
-  width: 1px;
-  height: 18px;
-  background: var(--border-2);
 }
 
 .spacer { flex: 1; }
 
-.check {
+/* ── Menu des indicateurs ──────────────────────────────────────────────── */
+.menuWrap { position: relative; }
+
+.menuBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.022);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font: 500 11px/1 var(--font);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.menuBtn:hover { background: rgba(255, 255, 255, 0.06); color: var(--text); }
+
+.menuBtnOpen {
+  background: rgba(96, 165, 250, 0.12);
+  border-color: var(--blue-ring);
+  color: var(--blue);
+}
+
+/* Le compte remplace ce que la barre montrait avant : rien n'est caché, c'est
+   seulement résumé. */
+.badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--blue);
+  color: #06121f;
+  font: 600 9px/1 var(--font-mono);
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: 268px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  animation: menuIn 0.14s ease-out;
+}
+
+@keyframes menuIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu { animation: none; }
+}
+
+.menuSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.menuSection + .menuSection { border-top: 1px solid var(--border); }
+
+.menuTitle {
+  font: 600 11px/1 var(--font);
+  color: var(--text);
+  margin: 0;
+}
+
+.menuHelp {
+  margin: 0;
+  font: 400 10px/1.5 var(--font);
+  color: var(--text-dim);
+}
+
+.menuHelp strong { color: var(--text-muted); font-weight: 600; }
+
+/* Légende des moyennes : la couleur seule ne dit pas quelle période elle
+   porte — le nom l'accompagne toujours. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 400 10px/1 var(--font-mono);
+  color: var(--text-muted);
+}
+
+.legend i {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--c);
+}
+
+.swingRow { display: flex; gap: 10px; }
+
+/* Titre de section avec son décompte : combien de motifs sont posés sur le
+   graphe en ce moment. Sans ce nombre, « FVG activé » ne dit pas s'il y en a. */
+.titleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.count {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-muted);
+  font: 600 9.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Les deux couleurs du motif, à côté de son nom : haussier puis baissier. La
+   légende vit là où on l'allume, pas dans un coin du graphe. */
+.swatchRow {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.swatchRow i {
+  width: 12px;
+  height: 8px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--c) 22%, transparent);
+  border: 1px solid var(--c);
+}
+
+.switch input:disabled + .switchTrack { opacity: 0.35; }
+.switch:has(input:disabled) { cursor: not-allowed; opacity: 0.55; }
+
+.rowOff { opacity: 0.4; }
+
+.miniField {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 10px/1 var(--font);
+  color: var(--text-dim);
+}
+
+/* ── Champs ────────────────────────────────────────────────────────────── */
+.textInput,
+.numInput {
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--bg);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  font: 400 11px/1 var(--font-mono);
+}
+
+.textInput { width: 100%; }
+.numInput  { width: 52px; text-align: center; }
+
+.textInput:focus-visible,
+.numInput:focus-visible,
+.jump select:focus-visible,
+.segBtn:focus-visible,
+.menuBtn:focus-visible,
+.pinBtn:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+.textInput::placeholder { color: var(--text-faint); }
+
+.numInput:disabled { cursor: not-allowed; }
+
+/* ── Interrupteur ──────────────────────────────────────────────────────── */
+/* Une case à cocher ne dit pas « allumé / éteint » aussi vite qu'un
+   interrupteur, et c'est bien ce qu'on demande ici. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   font: 500 11px/1 var(--font);
   color: var(--text-muted);
   cursor: pointer;
   user-select: none;
 }
 
-.check input {
-  accent-color: var(--blue);
-  width: 13px;
-  height: 13px;
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switchTrack {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  transition: background 0.15s ease, border-color 0.15s ease;
+  flex: 0 0 auto;
+}
+
+.switchTrack i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.switch input:checked + .switchTrack {
+  background: rgba(96, 165, 250, 0.28);
+  border-color: var(--blue-ring);
+}
+
+.switch input:checked + .switchTrack i {
+  transform: translateX(12px);
+  background: var(--blue);
+}
+
+.switch input:focus-visible + .switchTrack {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switchTrack, .switchTrack i { transition: none; }
+}
+
+/* Mode outil actif : l'ambre dit « le graphe ne réagit plus comme d'habitude »,
+   ce qui est exactement le cas — le glissement trace au lieu de déplacer. */
+.toolOn {
+  background: var(--amber-bg);
+  border-color: var(--amber-ring);
+  color: var(--amber);
+}
+
+.toolOn:hover { background: rgba(245, 158, 11, 0.18); color: var(--amber); }
+.toolOn .badge { background: var(--amber); }
+
+/* ── Zones : aide et fiche ─────────────────────────────────────────────── */
+.hint {
+  position: absolute;
+  bottom: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(13, 18, 32, 0.9);
+  border: 1px solid var(--border-2);
+  color: var(--text-dim);
+  font: 400 11px/1 var(--font);
+}
+
+.hintBtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bear);
+  font: 500 11px/1 var(--font);
+  text-decoration: underline;
+  text-underline-offset: 2px;
   cursor: pointer;
+}
+
+.hintBtn:hover { color: #ff7b78; }
+
+/* Fiche de la zone sélectionnée, et aide au tracé : toutes deux EN BAS AU
+   CENTRE. Le haut est déjà pris — la lecture instantanée à gauche, l'infobulle
+   du curseur qui suit la souris au-dessus — et deux panneaux qui se recouvrent
+   valent moins que pas de panneau du tout. */
+.zoneCard {
+  position: absolute;
+  bottom: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px 8px 14px;
+  border-radius: 10px;
+  background: rgba(11, 14, 23, 0.94);
+  border: 1px solid var(--border-2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.zoneRange {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  font: 400 11px/1 var(--font-mono);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.zoneRange b { color: var(--text); font-weight: 600; }
+
+/* La hauteur de la zone, en clair : c'est ce qu'on compare d'une zone à
+   l'autre pour juger si elle est trop large pour vouloir dire quelque chose. */
+.zoneRange em {
+  font-style: normal;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.zoneActions { display: inline-flex; align-items: center; gap: 4px; }
+
+.kindBtn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: 500 10.5px/1 var(--font);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.kindBtn:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
+
+.kindSupport.kindOn {
+  background: var(--bull-bg-2);
+  border-color: var(--bull-ring);
+  color: var(--bull);
+}
+
+.kindResistance.kindOn {
+  background: var(--bear-bg-2);
+  border-color: var(--bear-ring);
+  color: var(--bear);
+}
+
+.zoneDelete {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: 4px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.zoneDelete:hover { background: var(--bear-bg-2); color: var(--bear); }
+
+.kindBtn:focus-visible,
+.zoneDelete:focus-visible,
+.hintBtn:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
 }
 
 /* ── Témoin de direct ──────────────────────────────────────────────────── */
@@ -105,7 +496,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 11px;
+  padding: 6px 11px;
   border-radius: 999px;
   border: 1px solid transparent;
   font: 600 10px/1 var(--font);
@@ -116,7 +507,8 @@
   font: 400 10px/1 var(--font-mono);
   letter-spacing: 0;
   font-style: normal;
-  opacity: 0.75;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }
 
 .dot {
@@ -128,7 +520,8 @@
 
 /* Trois âges, trois lectures : ça arrive / ça tarde / ça ne vient plus.
    L'expert poste à chaque clôture M1 — au-delà d'une minute et demie sans
-   rien, quelque chose ne tourne pas. */
+   rien, quelque chose ne tourne pas. La couleur n'est jamais seule : le
+   nombre de secondes est écrit à côté. */
 .live_ok    { color: var(--bull);  background: var(--bull-bg);  border-color: var(--bull-ring); }
 .live_warn  { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-ring); }
 .live_stale { color: var(--bear);  background: var(--bear-bg);  border-color: var(--bear-ring); }
@@ -144,21 +537,29 @@
   .live_ok .dot { animation: none; }
 }
 
-.livePin {
+.pinBtn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 11px;
+  gap: 7px;
+  padding: 6px 11px;
   border-radius: 999px;
   background: var(--amber-bg);
   border: 1px solid var(--amber-ring);
   color: var(--amber);
   font: 600 10px/1 var(--font);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
-.livePin:hover { background: rgba(245, 158, 11, 0.18); }
+.pinBtn em {
+  font: 400 10px/1 var(--font);
+  font-style: normal;
+  letter-spacing: 0;
+  opacity: 0.75;
+}
+
+.pinBtn:hover { background: rgba(245, 158, 11, 0.18); }
 
 /* ── Zone du graphe ────────────────────────────────────────────────────── */
 .chartArea {
@@ -184,46 +585,70 @@
 
 .moreBadge {
   position: absolute;
-  left: 14px;
-  bottom: 14px;
+  left: 12px;
+  bottom: 12px;
   z-index: 3;
-  padding: 4px 9px;
-  border-radius: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
   background: rgba(13, 18, 32, 0.9);
   border: 1px solid var(--border-2);
   color: var(--text-dim);
   font: 500 10px/1 var(--font-mono);
 }
 
-/* ── Lecture instantanée, posée sur le graphe ──────────────────────────── */
+/* ── Lecture instantanée ───────────────────────────────────────────────── */
 .readout {
   position: absolute;
   top: 12px;
-  left: 14px;
+  left: 12px;
   z-index: 3;
-  pointer-events: none;   /* ne vole jamais un clic au graphe */
+  pointer-events: none;          /* ne vole jamais un clic au graphe */
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  padding: 10px 14px 11px;
+  border-radius: 10px;
+  /* Assez opaque pour rester lisible sur les bougies, assez transparent pour
+     qu'on voie ce qui passe dessous. */
+  background: rgba(11, 14, 23, 0.72);
+  border: 1px solid rgba(36, 49, 85, 0.7);
+  backdrop-filter: blur(8px);
+}
+
+.readHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .readPrice {
   font: 600 26px/1 var(--font-mono);
   letter-spacing: -0.02em;
   color: var(--text);
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+}
+
+/* Quelle source produit ce chiffre — sans quoi « 12785.1695 » ne dit pas s'il
+   parle du bid, de l'ask ou de leur milieu. */
+.readSrc {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(96, 165, 250, 0.14);
+  color: var(--blue);
+  font: 600 9px/1 var(--font);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .readGrid {
   display: flex;
-  gap: 14px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
 .stat {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .statLabel {
@@ -250,39 +675,62 @@
 .status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
-  padding: 7px 14px;
+  padding: 7px 12px;
   background: var(--surface);
   border-top: 1px solid var(--border);
   font: 400 11px/1 var(--font-mono);
-  color: var(--text-muted);
+  color: var(--text-dim);
   flex: 0 0 auto;
 }
 
-.statusStrong { color: var(--text); font-weight: 600; }
-.statusDim    { color: var(--text-faint); }
+.metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.metric b { color: var(--text); font-weight: 600; }
+
+.arrow { color: var(--text-faint); }
+
+.statusDot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.statusNote {
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 10.5px;
+}
 
 .jump {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  font: 500 10px/1 var(--font);
-  letter-spacing: 0.06em;
+  gap: 8px;
+}
+
+.jump > span {
+  font: 600 9px/1 var(--font);
+  letter-spacing: 0.13em;
   text-transform: uppercase;
   color: var(--text-dim);
 }
 
 .jump select {
-  padding: 4px 8px;
-  border-radius: 5px;
+  padding: 5px 9px;
+  border-radius: 7px;
   background: var(--surface-2);
   border: 1px solid var(--border-2);
   color: var(--text-muted);
   font: 400 11px/1 var(--font-mono);
-  text-transform: none;
-  letter-spacing: 0;
   cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
 
 .jump select:hover { border-color: var(--blue-ring); color: var(--text); }
@@ -295,7 +743,7 @@
   flex-direction: column;
   justify-content: center;
   gap: 12px;
-  max-width: 600px;
+  max-width: 580px;
   margin: 0 auto;
   padding: 24px;
 }
@@ -343,4 +791,16 @@
   border-top: 1px solid var(--border);
   font-size: 12px !important;
   color: var(--text-dim) !important;
+}
+
+/* ── Écrans étroits ────────────────────────────────────────────────────── */
+/* Sous 900 px, la barre passe sur deux lignes plutôt que de comprimer les
+   boutons sous le seuil du confortable. Le graphe perd une ligne, mais des
+   cibles trop petites lui coûteraient plus cher. */
+@media (max-width: 900px) {
+  .bar { gap: 6px; padding: 7px 10px; }
+  .group { padding-left: 8px; }
+  .readout { top: 8px; left: 8px; padding: 8px 11px 9px; }
+  .readPrice { font-size: 21px; }
+  .readGrid { gap: 12px; }
 }
