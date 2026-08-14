@@ -5,6 +5,8 @@ import { calcMA, calcRSI, calcBB, calcSwings } from '../../lib/indicators';
 import { calcEquilibrium } from '../../lib/equilibrium';
 import { calcHarmony } from '../../lib/harmony';
 import { createHarmonyPrimitive } from './HarmonyPrimitive';
+import { calcIchimoku } from '../../lib/ichimoku';
+import { createKumoPrimitive } from './KumoPrimitive';
 import { calcRangeZones } from '../../lib/periodZones';
 import { createRangeZonePrimitive } from './RangeZonePrimitive';
 import { calcFVG, calcRFVG, calcRFVGPositions, calcKO, calcKOPositions, calcHBHBHB, calcCompression, calcHBHB, calcHMBM, calcHMBMPositions } from '../../lib/patterns';
@@ -16,7 +18,9 @@ import {
 } from '../../lib/twins/params';
 import { calcXFVG } from '../../lib/xfvg/detect';
 import { detectOptions as xfvgDetectOptions, styleOptions as xfvgStyleOptions } from '../../lib/xfvg/params';
-import { calcDollars, calcDollarPivots } from '../../lib/dollars/detect';
+import { calcDollars, calcDollarSecond, calcDollarPivots, calcDollarClouds } from '../../lib/dollars/detect';
+import { createCloudPrimitive } from './CloudPrimitive';
+import { fractalZones } from '../../lib/dollars/fractal';
 import { calcDollarsPositions } from '../../lib/dollars/positions';
 import {
   detectOptions   as dollarsDetectOptions,
@@ -43,12 +47,13 @@ import {
   detectOptions as impulseDetectOptions,
   styleOptions  as impulseStyleOptions,
 } from '../../lib/impulse/params';
-import { calcRsier } from '../../lib/rsier/detect';
+import { calcRsier, rsierBoxes } from '../../lib/rsier/detect';
 import { calcRsierPositions } from '../../lib/rsier/positions';
 import {
   detectOptions   as rsierDetectOptions,
   positionOptions as rsierPositionOptions,
   styleOptions    as rsierStyleOptions,
+  playedSide      as rsierPlayedSide,
 } from '../../lib/rsier/params';
 import { calcTrenderZones } from '../../lib/trender/detect';
 import { calcTrenderPositions } from '../../lib/trender/positions';
@@ -85,6 +90,10 @@ import TradeSetup    from '../replay/TradeSetup';
 import styles from './TradingChart.module.css';
 
 const PREFETCH_THRESHOLD = 50;
+
+// Couleur nulle de LWC — sert à effacer les bougies en mode « ligne » sans les
+// retirer du graphe.
+const TRANSPARENT = 'rgba(0,0,0,0)';
 
 // Étiquette portée par le repère des motifs à MARQUEUR (ceux qui ne dessinent pas
 // de zone). Un motif absent d'ici ne perd que son texte, pas son repère.
@@ -203,6 +212,49 @@ function EqTooltip({ iv }) {
       </div>
 
       <div className={styles.eqVa}>valeur {fmtP(iv.val)} — {fmtP(iv.vah)}</div>
+    </div>
+  );
+}
+
+// Infobulle ICHIMOKU. Les quatre valeurs sont celles qui sont DESSINÉES sur la
+// bougie visée — les Senkou y ont 26 bougies d'avance, le Chikou 26 de retard.
+// La ligne « nuage » donne les deux bords dans l'ordre haut → bas et se colore
+// du sens du kumo à cet endroit, seule chose qui se lise vraiment à l'œil.
+function KumoTooltip({ iv }) {
+  const bull = iv.spanA != null && iv.spanB != null ? iv.spanA >= iv.spanB : null;
+  const hi = bull ? iv.spanA : iv.spanB;
+  const lo = bull ? iv.spanB : iv.spanA;
+  return (
+    <div className={styles.eqBlock}>
+      <div className={styles.indRow}>
+        <span
+          className={styles.indDot}
+          style={{ background: bull == null ? iv.color : (bull ? iv.bullColor : iv.bearColor) }}
+        />
+        <span className={styles.indLabel}>{iv.label}</span>
+      </div>
+
+      {[['Tenkan', iv.tenkan, iv.tenkanColor],
+        ['Kijun',  iv.kijun,  iv.kijunColor],
+        ['Chikou', iv.chikou, iv.chikouColor]].map(([k, v, c]) => v == null ? null : (
+        <div key={k} className={styles.indRow}>
+          <span className={styles.indDot} style={{ background: c }} />
+          <span className={styles.indLabel}>{k}</span>
+          <span className={styles.indVal}>{fmtP(v)}</span>
+        </div>
+      ))}
+
+      {bull != null && (
+        <div className={styles.indRow}>
+          <span className={styles.indDot} style={{ background: bull ? iv.bullColor : iv.bearColor }} />
+          <span className={styles.indLabel}>Nuage</span>
+          <span className={styles.bbVals} style={{ color: bull ? iv.bullColor : iv.bearColor }}>
+            <span>↑{fmtP(hi)}</span>
+            <span className={styles.bbSep}>─</span>
+            <span>↓{fmtP(lo)}</span>
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -503,6 +555,11 @@ export default function TradingChart({
   const chartRef        = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
+  // Mode « ligne » : une série d'aire posée EN PLUS des bougies, qui sont alors
+  // rendues transparentes. On ne remplace pas la série de bougies — tout est
+  // accroché à elle (primitives, lignes de prix, marqueurs, dessins), la
+  // détruire à chaque bascule de mode demanderait de tout ré-attacher.
+  const lineSeriesRef   = useRef(null);
   const maSeriesMapRef      = useRef(new Map());
   const bbSeriesMapRef      = useRef(new Map());
   const swingSeriesMapRef   = useRef(new Map());
@@ -510,17 +567,24 @@ export default function TradingChart({
   const eqSeriesMapRef      = useRef(new Map());
   const trenderMapRef       = useRef(new Map());
   const rangeMapRef         = useRef(new Map());
+  const kumoMapRef          = useRef(new Map());
   const patternSeriesMapRef = useRef(new Map());
   const fvgPrimitiveRef         = useRef(null);
   const xfvgPrimitiveRef        = useRef(null);
   const dollarsPrimitiveRef     = useRef(null);
+  // Le nuage a sa PROPRE primitive : quand le mode change, il faut détacher
+  // l'ancienne avant d'attacher l'autre, sinon les deux se dessinent.
+  const dollarsPrimKindRef      = useRef(null);
   const dollarsPosPrimitiveRef  = useRef(null);
   const xfvgxPrimitiveRef       = useRef(null);
   const xfvgxPosPrimitiveRef    = useRef(null);
   const impulsePrimitiveRef     = useRef(null);
-  // RSIER : la bande verticale (même primitive que les zones d'harmonie du
-  // TRENDER) et la série fantôme qui porte le triangle de début de zone.
+  // RSIER : la zone (bande verticale du TRENDER, ou rectangle de prix des FVG
+  // selon le style choisi) et la série fantôme qui porte le triangle de début de
+  // zone. `rsierPrimKindRef` retient LAQUELLE des deux primitives est attachée :
+  // sans lui, changer de style en attacherait une seconde par-dessus la première.
   const rsierPrimitiveRef       = useRef(null);
+  const rsierPrimKindRef        = useRef(null);
   const rsierMarksRef           = useRef(null);
   const rsierPosPrimitiveRef    = useRef(null);
   // Motif TRENDER : les mêmes trois pièces que le RSIER — la bande (primitive
@@ -562,6 +626,7 @@ export default function TradingChart({
   const bbDataMapRef     = useRef(new Map());
   const rsiDataMapRef    = useRef(new Map());
   const eqDataMapRef     = useRef(new Map());
+  const kumoDataMapRef   = useRef(new Map());
   const indicatorsRef    = useRef(indicators);
   useEffect(() => { indicatorsRef.current = indicators; }, [indicators]);
 
@@ -602,6 +667,10 @@ export default function TradingChart({
   // même règle : il ne touche QUE le dessin.
   const [dollarsShow, setDollarsShow] = useState({ tp: true, be: true, sl: true });
   const [rsierStats, setRsierStats] = useState(null);
+  // Filtre d'affichage TP / BE / SL du RSIER — celui du rFVG et du $$$, à la
+  // lettre : il ne touche QUE le dessin. Les compteurs du moniteur, l'espérance
+  // et le rapport JSON restent calculés sur TOUTES les positions.
+  const [rsierShow, setRsierShow] = useState({ tp: true, be: true, sl: true });
   const [harmoStats, setHarmoStats] = useState(null);
   // Rapport rFVG : mêmes positions que le dessin et le moniteur, gardées pour
   // le téléchargement JSON. Ref et non state : rien à re-rendre, le clic lit
@@ -616,6 +685,9 @@ export default function TradingChart({
   // repeigne sans relancer la détection.
   const dollarsPositionsRef = useRef(null);
   const rsierReportRef = useRef(null);
+  // Les positions RSIER déjà calculées, gardées pour que le filtre d'affichage
+  // repeigne sans relancer la détection (qui refait le RSI HTF et la MM).
+  const rsierPositionsRef = useRef(null);
   const harmoReportRef = useRef(null);
   // Moniteur / rapport KO (mode « position »), même logique que le rFVG — à ceci
   // près que les statistiques viennent de lib/signals/stats.js, la MÊME fonction
@@ -794,6 +866,23 @@ export default function TradingChart({
             threshold: ind.threshold ?? 70,
             comps: { pull: eq.pull, uni: eq.uni, conc: eq.conc, flat: eq.flat, sym: eq.sym, prox: eq.prox },
           });
+        } else if (ind.type === 'KUMO') {
+          // Les cinq valeurs telles qu'elles sont DESSINÉES sur cette bougie :
+          // les Senkou y sont celles calculées 26 bougies plus tôt, le Chikou
+          // la clôture de 26 bougies plus tard. C'est bien ce qu'on lit à
+          // l'écran à la verticale du curseur.
+          const k = kumoDataMapRef.current.get(ind.id)?.get(time);
+          if (k) indValues.push({
+            type: 'KUMO',
+            label: `ICHIMOKU(${ind.tenkanLen ?? 9},${ind.kijunLen ?? 26},${ind.senkouLen ?? 52})`,
+            color: ind.tenkanColor ?? ind.color,
+            ...k,
+            tenkanColor: ind.tenkanColor ?? '#60A5FA',
+            kijunColor:  ind.kijunColor  ?? '#F472B6',
+            chikouColor: ind.chikouColor ?? '#94A3B8',
+            bullColor:   ind.bullColor   ?? '#26A69A',
+            bearColor:   ind.bearColor   ?? '#EF5350',
+          });
         }
       }
       setTooltip({ x, y, flipX, time, candle, indValues });
@@ -810,15 +899,18 @@ export default function TradingChart({
       eqSeriesMapRef.current.clear();
       trenderMapRef.current.clear();
       rangeMapRef.current.clear();
+      kumoMapRef.current.clear();
       patternSeriesMapRef.current.clear();
       fvgPrimitiveRef.current  = null;
       xfvgPrimitiveRef.current = null;
       dollarsPrimitiveRef.current    = null;
+      dollarsPrimKindRef.current     = null;
       dollarsPosPrimitiveRef.current = null;
       xfvgxPrimitiveRef.current    = null;
       xfvgxPosPrimitiveRef.current = null;
       impulsePrimitiveRef.current  = null;
       rsierPrimitiveRef.current = null;
+      rsierPrimKindRef.current  = null;
       rsierMarksRef.current     = null;
       rsierPosPrimitiveRef.current = null;
       harmoPrimitiveRef.current    = null;
@@ -840,6 +932,10 @@ export default function TradingChart({
       compressionPrimitiveRef.current = null;
       tradesPrimitiveRef.current      = null;
       appliedFocusRef.current         = null;
+      // La série de la ligne meurt avec le graphe : sans cette remise à zéro, un
+      // remontage en mode ligne garderait la référence d'une série détruite et
+      // n'en recréerait jamais — courbe absente, sans une seule erreur.
+      lineSeriesRef.current           = null;
       // Le graphe vient d'être détruit : sans cette remise à zéro, un remontage
       // (StrictMode, ou tout parent qui remonte le composant avec ses bougies
       // déjà chargées) verrait `candles === prevCandles`, croirait à un simple
@@ -850,6 +946,7 @@ export default function TradingChart({
       bbDataMapRef.current.clear();
       rsiDataMapRef.current.clear();
       eqDataMapRef.current.clear();
+      kumoDataMapRef.current.clear();
       tradePriceLinesRef.current = [];
       chart.remove();
     };
@@ -926,7 +1023,18 @@ export default function TradingChart({
       chart.timeScale().applyOptions({ barSpacing: theme.axis.barSpacing });
     }
 
-    candle.applyOptions({
+    // En mode ligne, les bougies sont EFFACÉES mais restent en place : elles
+    // portent l'échelle des prix (donc les mèches continuent de cadrer la vue) et
+    // tout ce qui leur est accroché. `visible: false` les retirerait du dessin —
+    // et avec elles les primitives des motifs.
+    candle.applyOptions(chartMode === 'line' ? {
+      upColor:          TRANSPARENT,
+      downColor:        TRANSPARENT,
+      borderVisible:    false,
+      wickVisible:      false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    } : {
       upColor:          theme.candle.upColor,
       downColor:        theme.candle.downColor,
       borderVisible:    theme.candle.borderVisible,
@@ -951,7 +1059,7 @@ export default function TradingChart({
     ) {
       volume.setData(prevCandlesRef.current.map(volBar));
     }
-  }, [theme, watermarkText]);
+  }, [theme, watermarkText, chartMode]);
 
   // ── Répartition verticale des panneaux (bougies / volume / RSI) ───────────
   useEffect(() => {
@@ -1049,6 +1157,10 @@ export default function TradingChart({
         const c = candles[i];
         candleSeriesRef.current.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close });
         volumeSeriesRef.current.update(volBar(c));
+        // La ligne suit le même chemin incrémental que les bougies : en LIVE, la
+        // réécrire entièrement à chaque sondage coûterait tout le tableau pour
+        // une seule clôture qui bouge.
+        lineSeriesRef.current?.update({ time: c.time, value: c.close });
       }
       if (replayPlayingRef.current) ts.scrollToRealTime();
     } else {
@@ -1059,6 +1171,7 @@ export default function TradingChart({
         candles.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })),
       );
       volumeSeriesRef.current.setData(candles.map(volBar));
+      lineSeriesRef.current?.setData(candles.map(c => ({ time: c.time, value: c.close })));
       if (replayPlayingRef.current) {
         ts.scrollToRealTime();
       } else {
@@ -1069,6 +1182,51 @@ export default function TradingChart({
     prevCandlesRef.current   = candles;
     candlesByTimeRef.current = new Map(candles.map(c => [c.time, c]));
   }, [candles]);
+
+  // ── Mode « ligne » : la courbe des clôtures ───────────────────────────────
+  // Une série d'AIRE (et non de ligne) dans les deux cas : sans remplissage, ses
+  // deux bornes sont transparentes et il ne reste que le trait — une seule série
+  // à gérer plutôt qu'un aller-retour entre deux types.
+  // Elle est ajoutée à côté des bougies, jamais à leur place : le mode ne touche
+  // qu'aux couleurs des bougies (cf. l'effet de thème), donc primitives, lignes
+  // de prix, marqueurs et dessins restent accrochés et dessinés.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    if (chartMode !== 'line') {
+      if (lineSeriesRef.current) {
+        try { chart.removeSeries(lineSeriesRef.current); } catch {}
+        lineSeriesRef.current = null;
+      }
+      return;
+    }
+
+    if (!lineSeriesRef.current) {
+      lineSeriesRef.current = chart.addAreaSeries({
+        priceScaleId: 'right',
+        priceLineVisible: false,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 3,
+        lastValueVisible: true,
+        title: '',
+      });
+    }
+    lineSeriesRef.current.applyOptions({
+      lineColor:   theme.line.color,
+      lineWidth:   theme.line.width,
+      topColor:    theme.line.top,
+      bottomColor: theme.line.bottom,
+      priceLineVisible: theme.candle.priceLineVisible,
+      lastValueVisible: theme.candle.lastValueVisible,
+    });
+    // Les DONNÉES ne sont posées qu'ici, à la création de la série et à chaque
+    // changement de thème. Ensuite c'est l'effet des bougies ci-dessus qui les
+    // entretient, du même geste qu'elles — sinon un sondage live réécrirait toute
+    // la série alors qu'une seule clôture a bougé.
+    const cur = prevCandlesRef.current ?? candles ?? [];
+    lineSeriesRef.current.setData(cur.map(c => ({ time: c.time, value: c.close })));
+  }, [chartMode, theme]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Trades de backtest : positions + marqueurs d'entrée / sortie ──────────
   // Les temps d'un trade ne tombent pas sur des temps de bougie : l'entrée est
@@ -1579,6 +1737,93 @@ export default function TradingChart({
     }
   }, [candles, indicators, theme]);
 
+  // ── KUMO — le nuage d'Ichimoku ────────────────────────────────────────────
+  // Cinq lignes en séries ordinaires, et la surface entre les deux Senkou par
+  // une primitive (lightweight-charts ne sait pas remplir entre deux courbes).
+  //
+  // Les deux Senkou portent des horodatages qui n'existent pas encore : c'est
+  // leur setData qui OUVRE la place à droite du graphe. Elles sont donc
+  // toujours alimentées, même masquées — sinon le nuage projeté n'aurait plus
+  // d'abscisse où se poser.
+  useEffect(() => {
+    const chart  = chartRef.current;
+    const series = candleSeriesRef.current;
+    if (!chart || !series) return;
+
+    const kInds  = indicators.filter(i => i.type === 'KUMO');
+    const map    = kumoMapRef.current;
+    const active = new Set(kInds.map(i => i.id));
+
+    for (const [id, e] of map) {
+      if (!active.has(id)) {
+        for (const s of [e.tenkan, e.kijun, e.spanA, e.spanB, e.chikou]) chart.removeSeries(s);
+        try { series.detachPrimitive(e.prim); } catch {}
+        map.delete(id);
+        kumoDataMapRef.current.delete(id);
+      }
+    }
+
+    for (const ind of kInds) {
+      if (!map.has(ind.id)) {
+        const prim = createKumoPrimitive();
+        series.attachPrimitive(prim);
+        const base = { lineWidth: 1.5, priceLineVisible: false, crosshairMarkerRadius: 3 };
+        map.set(ind.id, {
+          prim,
+          tenkan: chart.addLineSeries({ ...base, lastValueVisible: true }),
+          kijun:  chart.addLineSeries({ ...base, lastValueVisible: true }),
+          // Bords du nuage : trait fin, aucune étiquette de prix — leur dernière
+          // valeur tombe 26 bougies dans le futur, l'axe mentirait.
+          spanA:  chart.addLineSeries({ ...base, lineWidth: 1, lastValueVisible: false, crosshairMarkerVisible: false }),
+          spanB:  chart.addLineSeries({ ...base, lineWidth: 1, lastValueVisible: false, crosshairMarkerVisible: false }),
+          chikou: chart.addLineSeries({ ...base, lineWidth: 1, lastValueVisible: false }),
+        });
+      }
+      const e = map.get(ind.id);
+
+      const tCol    = ind.tenkanColor ?? '#60A5FA';
+      const kCol    = ind.kijunColor  ?? '#F472B6';
+      const chCol   = ind.chikouColor ?? '#94A3B8';
+      const bull    = ind.bullColor   ?? theme.candle.bull;
+      const bear    = ind.bearColor   ?? theme.candle.bear;
+      const showCld = ind.showCloud   !== false;
+
+      e.tenkan.applyOptions({ color: tCol,  title: `Tenkan(${ind.tenkanLen ?? 9})`,  visible: ind.showTenkan !== false });
+      e.kijun .applyOptions({ color: kCol,  title: `Kijun(${ind.kijunLen ?? 26})`,   visible: ind.showKijun  !== false });
+      // Pas d'étiquette pour le Chikou : sa dernière valeur EST la clôture
+      // courante, posée 26 bougies en arrière. Sur l'axe, elle se confondrait
+      // avec le prix du moment et raconterait un niveau qui n'existe pas.
+      e.chikou.applyOptions({ color: chCol, title: '',                               visible: ind.showChikou !== false });
+      // Les bords prennent la couleur de LEUR camp, pas celle du nuage à
+      // l'instant t : Senkou A est la ligne rapide, elle reste identifiable
+      // même quand elle passe dessous.
+      e.spanA.applyOptions({ color: bull + 'C0', title: '', visible: ind.showSpans !== false });
+      e.spanB.applyOptions({ color: bear + 'C0', title: '', visible: ind.showSpans !== false });
+
+      if (!candles?.length) {
+        for (const s of [e.tenkan, e.kijun, e.spanA, e.spanB, e.chikou]) s.setData([]);
+        e.prim.update([], { showCloud: false });
+        kumoDataMapRef.current.delete(ind.id);
+        continue;
+      }
+
+      const ichi = calcIchimoku(candles, ind);
+      e.tenkan.setData(ichi.tenkan);
+      e.kijun .setData(ichi.kijun);
+      e.spanA .setData(ichi.spanA);
+      e.spanB .setData(ichi.spanB);
+      e.chikou.setData(ichi.chikou);
+
+      e.prim.update(ichi.cloud, {
+        bullColor: bull,
+        bearColor: bear,
+        opacity:   Math.max(0, Math.min(100, ind.cloudOpacity ?? 16)) / 100,
+        showCloud: showCld,
+      });
+      kumoDataMapRef.current.set(ind.id, ichi.points);
+    }
+  }, [candles, indicators, theme]);
+
   // ── Pattern markers ───────────────────────────────────────────────────────
   useEffect(() => {
     const chart = chartRef.current;
@@ -1761,6 +2006,7 @@ export default function TradingChart({
       if (dollarsPrimitiveRef.current) {
         try { series.detachPrimitive(dollarsPrimitiveRef.current); } catch {}
         dollarsPrimitiveRef.current = null;
+        dollarsPrimKindRef.current = null;
       }
     };
     const dropPositions = () => {
@@ -1783,18 +2029,39 @@ export default function TradingChart({
     if (display === 'position') {
       dropZones();
     } else {
-      if (!dollarsPrimitiveRef.current) {
-        dollarsPrimitiveRef.current = createFvgPrimitive();
-        series.attachPrimitive(dollarsPrimitiveRef.current);
-      }
-      // Deux façons de dessiner la MÊME figure, et le choix ne touche que le
-      // dessin : les boîtes des deux FVG, ou le seul trait de l'arête qu'elles
-      // partagent. Les positions, elles, ne s'en aperçoivent pas.
+      // QUATRE façons de dessiner la MÊME figure, et le choix ne touche que le
+      // dessin — les positions ne s'en aperçoivent pas. Trois passent par la
+      // primitive des FVG (les deux boîtes, ou un trait plat) ; le nuage a la
+      // sienne. Changer de famille impose donc de DÉTACHER l'ancienne : deux
+      // primitives attachées dessineraient l'une par-dessus l'autre.
       const style = dollarsStyleOptions(dollars);
+      const kind  = style.zoneStyle === 'nuage' ? 'nuage' : 'fvg';
+
+      if (dollarsPrimKindRef.current !== kind) dropZones();
+      if (!dollarsPrimitiveRef.current) {
+        dollarsPrimitiveRef.current = kind === 'nuage' ? createCloudPrimitive() : createFvgPrimitive();
+        series.attachPrimitive(dollarsPrimitiveRef.current);
+        dollarsPrimKindRef.current = kind;
+      }
+
+      // Le mode FRACTAL détecte sur des bougies d'une unité supérieure, puis
+      // ramène les zones sur l'échelle de temps du graphe. Il ne change QUE le
+      // dessin : les positions, plus bas, restent calculées sur les bougies
+      // affichées. C'est l'intérêt du mode — voir une figure M15 en tradant en
+      // M1 —, mais il ne faut pas se tromper sur ce qu'il déplace.
+      const nuage   = style.zoneStyle === 'nuage';
+      const pivOpts = dollarsPivotOptions(dollars);
+      const boites = style.zoneStyle === 'boites' || style.zoneStyle === 'seconde';
+      const calc = style.zoneStyle === 'boites' ? calcDollars
+        : style.zoneStyle === 'seconde' ? calcDollarSecond
+        : nuage ? calcDollarClouds
+        : calcDollarPivots;
+      const opts = boites ? dollarsDetectOptions(dollars) : pivOpts;
+
       dollarsPrimitiveRef.current.update(
-        style.zoneStyle === 'boites'
-          ? calcDollars(candles, dollarsDetectOptions(dollars))
-          : calcDollarPivots(candles, dollarsPivotOptions(dollars)),
+        nuage && dollars.fractal === true
+          ? fractalZones(candles, { ...opts, fractalHtf: dollars.fractalHtf ?? 'M15' }, calc)
+          : calc(candles, opts),
         style,
       );
     }
@@ -2013,6 +2280,7 @@ export default function TradingChart({
       if (rsierPrimitiveRef.current) {
         try { series.detachPrimitive(rsierPrimitiveRef.current); } catch {}
         rsierPrimitiveRef.current = null;
+        rsierPrimKindRef.current  = null;
       }
       if (rsierMarksRef.current) {
         chart.removeSeries(rsierMarksRef.current);
@@ -2031,9 +2299,22 @@ export default function TradingChart({
       return;
     }
 
+    // DEUX FAÇONS DE DESSINER LA MÊME SURZONE, et deux primitives différentes :
+    // la bande pleine hauteur (celle du TRENDER) ou un rectangle de prix (celle
+    // des FVG). Changer de style impose de DÉTACHER l'ancienne — deux primitives
+    // attachées dessineraient l'une par-dessus l'autre, et la bande resterait à
+    // l'écran sans que rien ne le signale. C'est le câblage du $$$, à la lettre.
+    const style = rsierStyleOptions(rsier);
+    const kind  = style.zoneStyle === 'boite' ? 'boite' : 'bande';
+
+    if (rsierPrimKindRef.current !== kind && rsierPrimitiveRef.current) {
+      try { series.detachPrimitive(rsierPrimitiveRef.current); } catch {}
+      rsierPrimitiveRef.current = null;
+    }
     if (!rsierPrimitiveRef.current) {
-      rsierPrimitiveRef.current = createHarmonyPrimitive();
+      rsierPrimitiveRef.current = kind === 'boite' ? createFvgPrimitive() : createHarmonyPrimitive();
       series.attachPrimitive(rsierPrimitiveRef.current);
+      rsierPrimKindRef.current = kind;
     }
     if (!rsierMarksRef.current) {
       rsierMarksRef.current = chart.addLineSeries({
@@ -2043,20 +2324,50 @@ export default function TradingChart({
       });
     }
 
-    const { zones, warmup } = calcRsier(candles, rsierDetectOptions(rsier), htfBars);
-    const style = rsierStyleOptions(rsier);
+    const { zones: surzones, warmup } = calcRsier(candles, rsierDetectOptions(rsier), htfBars);
 
-    rsierPrimitiveRef.current.update(zones, {
-      bullColor: style.bullColor,
-      bearColor: style.bearColor,
-      bgTransp:  style.bgTransp,
-      showBg:    style.showBg,
-      showSlLn:  false,
-    });
+    // LE SENS DESSINÉ EST CELUI QU'ON JOUE. La détection rend le sens de la
+    // SURZONE ('bull' = survente) ; en continuation, on la vend. Dessiner la
+    // surzone donnerait une bande verte et une flèche vers le HAUT là où le
+    // motif prend une vente — le repère annoncerait le contraire de ce qu'il
+    // fait. La bascule tient dans ce seul map : tout ce qui suit (fond, flèche,
+    // côté d'ancrage) lit `side` sans savoir d'où il vient.
+    const zones = surzones.map(z => ({ ...z, side: rsierPlayedSide(z.side, rsier) }));
+
+    if (kind === 'boite') {
+      // Le rectangle : ancré sur le prix d'ENTRÉE, ± les hauteurs réglées en
+      // points, long de N bougies. La géométrie vient de lib/rsier/detect.js,
+      // avec les zones déjà passées au sens joué.
+      // `bgTransp` suit la convention Pine (0 = opaque, 100 = invisible), la
+      // primitive des FVG une opacité (0 → 1) : la conversion est ici, une fois.
+      rsierPrimitiveRef.current.update(rsierBoxes(candles, zones, style), {
+        bullColor: style.bullColor,
+        bearColor: style.bearColor,
+        opacity:   style.showBg ? (100 - style.bgTransp) / 100 : 0,
+        // Les boîtes n'ont pas d'étiquette à elles (cf. rsierBoxes) ; ce
+        // drapeau ne sert plus qu'au chiffre de la cote.
+        showLabel:  style.showMaDist,
+        showMaDist: style.showMaDist,
+      });
+    } else {
+      rsierPrimitiveRef.current.update(zones, {
+        bullColor: style.bullColor,
+        bearColor: style.bearColor,
+        bgTransp:  style.bgTransp,
+        showBg:    style.showBg,
+        showSlLn:  false,
+        // La cote entre le prix d'entrée et la moyenne mobile. Les zones portent
+        // déjà les deux prix (cf. lib/rsier/detect.js) : rien n'est recalculé ici.
+        showMaDist: style.showMaDist,
+      });
+    }
 
     // Triangle sur la bougie qui OUVRE la zone — celle où le motif est connu.
-    // Le texte nomme le HTF lu et le RSI qui a ouvert la zone : sans lui, deux
-    // RSIER réglés sur des unités différentes seraient indiscernables à l'œil.
+    // Il pointe dans le sens de la POSITION (cf. le map ci-dessus) : vers le bas
+    // et au-dessus de la bougie pour une vente. Le texte nomme le HTF lu et le
+    // RSI qui a ouvert la zone — sans lui, deux RSIER réglés sur des unités
+    // différentes seraient indiscernables à l'œil ; ce RSI reste celui de la
+    // surzone, c'est une mesure, pas un sens.
     if (style.showMark) {
       const marks = zones.map(z => ({
         time:     z.startTime,
@@ -2104,6 +2415,7 @@ export default function TradingChart({
     if (!rsier || !candles?.length || (rsier.display ?? 'both') === 'zone') {
       dropPositions();
       setRsierStats(null); rsierReportRef.current = null;
+      rsierPositionsRef.current = null;
       return;
     }
 
@@ -2114,8 +2426,11 @@ export default function TradingChart({
     const posOpts   = rsierPositionOptions(rsier);
     const positions = calcRsierPositions(candles, posOpts, htfBars);
     // L'entrée étant au marché, aucun signal n'est 'missed' — le filtre reste,
-    // pour que ce câblage se lise comme celui des trois autres motifs.
-    rsierPosPrimitiveRef.current.update(positions.filter(p => p.status !== 'missed'), null);
+    // pour que ce câblage se lise comme celui des trois autres motifs. Le filtre
+    // TP / BE / SL s'applique ensuite, et lui non plus ne touche que le dessin.
+    const dessinables = positions.filter(p => p.status !== 'missed');
+    rsierPositionsRef.current = dessinables;
+    rsierPosPrimitiveRef.current.update(filterPositionsByOutcome(dessinables, rsierShow), null);
 
     // TP réglé en points = objectif CONSTANT : on le donne aux statistiques, qui
     // sinon le déduiraient de la médiane des distances observées. En RR, il varie
@@ -2139,12 +2454,26 @@ export default function TradingChart({
       // Ce que la simulation n'a pas pu jouer : les zones ouvertes trop tôt dans
       // les données pour ancrer un stop. Sans ce compte, le rapport aurait moins
       // de positions que de zones sans jamais dire pourquoi.
+      // Le rapport reçoit `positions`, pas `dessinables` : les issues masquées y
+      // restent. Le filtre est du dessin.
       extraStats: {
         zonesTotal:       positions.zonesTotal ?? null,
         skippedByHistory: positions.skippedByHistory ?? 0,
       },
     };
+    // `rsierShow` n'est PAS une dépendance : un clic sur TP / BE / SL ne doit pas
+    // relancer la détection (RSI HTF + moyenne mobile + simulation). C'est
+    // l'effet ci-dessous qui repeint, depuis les positions déjà calculées —
+    // exactement comme le rFVG et le $$$.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, patterns, htfBars]);
+
+  // Filtre TP / BE / SL du RSIER : on re-peint la primitive depuis les positions
+  // déjà calculées.
+  useEffect(() => {
+    rsierPosPrimitiveRef.current?.update(
+      filterPositionsByOutcome(rsierPositionsRef.current, rsierShow), null);
+  }, [rsierShow]);
 
   // ── Motif TRENDER : les zones d'harmonie ───────────────────────────────────
   // MÊME calcul que l'indicateur TRENDER plus haut — littéralement la même
@@ -2593,8 +2922,10 @@ export default function TradingChart({
         entree: "AU MARCHÉ, et rien d'autre : à l'OUVERTURE de la bougie qui ouvre la zone — une position par ENTRÉE en surzone, pas une par bougie de zone. La bougie HTF qui a fait basculer le RSI s'est clôturée AVANT que cette bougie ne s'ouvre : son RSI est donc déjà connu à cet instant et rien n'est anticipé. Il n'existe pas de mode 'zone' pour ce motif — la bande est faite de TEMPS et non de prix, il n'y a aucun bord où poser un ordre en attente : entryMode est forcé à 'market' même si un réglage enregistré disait autre chose",
         signauxRates: "aucun : l'entrée étant au marché, toute zone jouable donne une position. Le statut 'missed' et le champ waitedBars n'apparaissent jamais dans ce rapport — ils restent dans la forme du document pour que les motifs de la famille se comparent champ à champ. En revanche skippedByHistory compte les zones ÉCARTÉES : celles qui s'ouvrent avant qu'on dispose des slLookback bougies où ancrer le stop. zonesTotal dit combien de zones la détection a trouvé en tout",
         stop: "le motif ne désigne AUCUNE structure de prix — seulement un instant. slMode = 'structure' : sous le plus BAS des slLookback bougies qui PRÉCÈDENT l'entrée (au-dessus du plus HAUT en vente), moins slMarginPts — le dernier extrême laissé par le marché avant qu'on entre ; le risque varie alors d'une position à l'autre. slMode = 'points' : à slPts de l'entrée, risque CONSTANT — le seul stop vraiment natif du motif. Dans les deux cas le stop est connu avant l'entrée, donc actif dès la bougie d'entrée",
-        sensJoue: "tradeSide = 'reversion' (défaut) : on ACHÈTE la survente et on VEND le surachat, le pari étant que l'excès se corrige. tradeSide = 'continuation' : exactement l'inverse, la surzone étant lue comme une tendance qui continue. Le sens de la ZONE ne change pas pour autant — une zone de survente reste une survente, même quand on la vend",
+        sensJoue: "tradeSide = 'continuation' (défaut) : on VEND la survente et on ACHÈTE le surachat, la surzone étant lue comme une tendance qui continue. tradeSide = 'reversion' : exactement l'inverse, on achète la survente et on vend le surachat en pariant que l'excès se corrige. Le sens de la ZONE ne change pas pour autant — une zone de survente reste une survente, et par défaut c'est elle qu'on vend. Les positions ne portent que le sens RÉELLEMENT pris (direction) : la surzone dont chacune vient se retrouve en lisant tradeSide, qui est dans les paramètres de ce rapport",
         nonRepaint: "chaque bougie du graphe lit le RSI de la dernière bougie HTF CLÔTURÉE (équivalent de request.security(expr[1], lookahead_on) en Pine). Une zone n'ouvre donc jamais dans le bucket HTF où le RSI est entré en surzone, mais sur la PREMIÈRE bougie du bucket suivant : c'est le décalage qu'on paie pour que l'historique ne mente pas sur ce qu'on aurait vu en direct",
+        cloture: "exitFill = 'level' (défaut) : le SL et le TP sont des ordres laissés sur le marché, servis AU niveau touché — au pire de l'ouverture si la bougie l'a franchi en gap. exitFill = 'close' : le niveau touché ne déclenche plus une exécution mais une DÉCISION, appliquée à la CLÔTURE de la bougie qui l'a touché, comme le ferait une stratégie qui ne regarde le marché qu'aux clôtures (un EA à la bougie, pas au tick). Le toucher est jugé exactement pareil dans les deux modes ; seul le prix obtenu change, et il s'applique à TOUTES les sorties par niveau — SL, TP et les trois break-even. TROIS CONSÉQUENCES : (1) une position sortie sur TP peut finir PERDANTE et une sortie sur SL gagnante, la bougie ayant le temps de revenir sur ses pas ; (2) le statut continue de dire quelle RÈGLE a agi ('tp', 'sl', 'be') et non si l'issue est gagnante — un winrate compté sur les statuts devient le taux de trades qui ont ATTEINT leur cible, plus le taux de trades profitables, alors que profitPoints et netPoints restent vrais ; (3) la perte n'est plus bornée par le risque initial, si bien que maxDrawdownPts et maxPullupPts cessent d'être plafonnés à risk0 et à la distance de la cible — les plafonner tairait ce que ce mode ajoute de risque, et un R de position peut donc dépasser −1",
+        distanceMoyenne: "maDistPeriod > 0 mesure l'écart entre le PRIX D'ENTRÉE et une moyenne mobile du GRAPHE (pas du HTF : on compare un prix d'entrée à une moyenne de la même échelle), lue sur la bougie qui PRÉCÈDE l'entrée — à l'ouverture, la clôture de la bougie d'entrée n'existe pas encore. L'écart est SIGNÉ DANS LE SENS DE L'EXCÈS : positif = survente sous la moyenne ou surachat au-dessus, négatif = l'entrée est du mauvais côté de la moyenne. Le signe ne bascule pas avec tradeSide. maDistMode = 'min' | 'max' en fait un FILTRE portant sur la valeur absolue (maDistMin / maDistMax) : les zones écartées ne sont ni dessinées ni jouées, et une zone sans mesure (moyenne pas encore chaude) est écartée tant qu'un seuil est actif",
       },
     ),
     [downloadFamilyReport]);
@@ -3676,9 +4007,12 @@ export default function TradingChart({
           );
         })()}
 
-        {/* Moniteur RSIER : dernier de la pile. Comme Twins Bars, son TP peut se
-            régler en points — le RR affiché est alors le médian RÉALISÉ, faute de
-            RR visé. */}
+        {/* Moniteur RSIER. Comme Twins Bars, son TP peut se régler en points — le
+            RR affiché est alors le médian RÉALISÉ, faute de RR visé.
+            Il porte le filtre TP / BE / SL, ce qui lui ajoute une rangée de
+            boutons : 3 px d'écart + 21 px de rangée. Les deux moniteurs qui
+            s'empilent SOUS lui (TRENDER, $$$) comptent donc 156 et non 132 —
+            sans quoi ils lui monteraient dessus. */}
         {rsierStats && (() => {
           const pat   = patterns.find(p => p.type === 'RSIER' && p.enabled);
           const enPts = pat?.tpMode === 'points';
@@ -3688,6 +4022,8 @@ export default function TradingChart({
           return (
             <PatternMonitor nom="RSIER" couleur="#F59E0B" stats={rsierStats}
               rr={rrVal} rrMedian={enPts}
+              show={rsierShow}
+              onToggle={k => setRsierShow(s => ({ ...s, [k]: !s[k] }))}
               top={10 + (rfvgStats ? 136 : 0) + (koStats ? 112 : 0) + (hmbmStats ? 112 : 0)
                    + (liqStats ? 132 : 0) + (revStats ? 132 : 0) + (twinsStats ? 132 : 0)
                    + (xfvgxStats ? 132 : 0)} />
@@ -3713,7 +4049,7 @@ export default function TradingChart({
               onToggle={k => setDollarsShow(s => ({ ...s, [k]: !s[k] }))}
               top={10 + (rfvgStats ? 136 : 0) + (koStats ? 112 : 0) + (hmbmStats ? 112 : 0)
                    + (liqStats ? 132 : 0) + (revStats ? 132 : 0) + (twinsStats ? 132 : 0)
-                   + (xfvgxStats ? 132 : 0) + (rsierStats ? 132 : 0) + (harmoStats ? 132 : 0)} />
+                   + (xfvgxStats ? 132 : 0) + (rsierStats ? 156 : 0) + (harmoStats ? 132 : 0)} />
           );
         })()}
 
@@ -3727,7 +4063,7 @@ export default function TradingChart({
               rr={rrVal} rrMedian
               top={10 + (rfvgStats ? 136 : 0) + (koStats ? 112 : 0) + (hmbmStats ? 112 : 0)
                    + (liqStats ? 132 : 0) + (revStats ? 132 : 0) + (twinsStats ? 132 : 0)
-                   + (xfvgxStats ? 132 : 0) + (rsierStats ? 132 : 0)} />
+                   + (xfvgxStats ? 132 : 0) + (rsierStats ? 156 : 0)} />
           );
         })()}
 
@@ -4111,6 +4447,8 @@ export default function TradingChart({
               <hr className={styles.ttDivider} />
               {tooltip.indValues.map((iv, i) => iv.type === 'EQ' ? (
                 <EqTooltip key={i} iv={iv} />
+              ) : iv.type === 'KUMO' ? (
+                <KumoTooltip key={i} iv={iv} />
               ) : (
                 <div key={i} className={styles.indRow}>
                   <span className={styles.indDot} style={{ background: iv.color }} />

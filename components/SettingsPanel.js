@@ -251,6 +251,23 @@ export default function SettingsPanel({ settings, onChange, onClose }) {
               <Field label="Largeur des bougies" hint="Espacement initial entre deux bougies — la molette continue de zoomer librement.">
                 <Slider value={s.barSpacing} min={2} max={24} onChange={v => set({ barSpacing: v })} format={v => `${v} px`} />
               </Field>
+
+              {/* Le mode « Line » de la barre du graphe. Une clôture n'a pas de
+                  sens haussier ou baissier : une seule couleur, pas un couple. */}
+              <Field
+                label={<><span className={styles.labelDot} style={{ background: s.lineColor }} />Ligne des clôtures</>}
+                hint="Utilisée par le mode « Line » de la barre du graphe."
+              >
+                <Swatches value={s.lineColor} onChange={v => set({ lineColor: v })} />
+              </Field>
+
+              <Field label="Épaisseur du trait">
+                <Slider value={s.lineWidth} min={1} max={4} onChange={v => set({ lineWidth: v })} format={v => `${v} px`} />
+              </Field>
+
+              <Field label="Remplissage sous la ligne" inline>
+                <Toggle on={s.lineFill} onChange={v => set({ lineFill: v })} labels={['Dégradé', 'Aucun']} />
+              </Field>
             </>
           )}
 

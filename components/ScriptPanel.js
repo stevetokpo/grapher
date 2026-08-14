@@ -152,7 +152,7 @@ function Section({ title, summary, open, onToggle, children }) {
 
 // ── Panneau ──────────────────────────────────────────────────────────────────
 export default function ScriptPanel({
-  candles = [], symbolName = '', tfId = '', patterns = [],
+  candles = [], symbolName = '', tfId = '', patterns = [], htfBars = null,
   config, onChange, onClose,
   // Les positions vont se peindre SUR le graphe, derrière ce tiroir : c'est la
   // page qui les tient, pour qu'elles survivent à la fermeture du panneau — on
@@ -164,9 +164,13 @@ export default function ScriptPanel({
   // Ce que le graphe sait, remis tel quel aux scripts : un script qui joue un
   // motif lit SES réglages ici plutôt que de les redemander. La détection se
   // règle donc à un seul endroit, le panneau Patterns.
+  // `htfBars` en fait partie : un motif qui lit le RSI d'une unité de temps
+  // supérieure (RSIER, TRENDER) doit voir la MÊME série que le graphe, celle
+  // servie par /api/htf. Sans elle, le script la reconstruirait depuis les
+  // bougies chargées et lirait un RSI plus court que celui qui est dessiné.
   const context = useMemo(
-    () => ({ patterns, symbol: symbolName, tf: tfId }),
-    [patterns, symbolName, tfId],
+    () => ({ patterns, symbol: symbolName, tf: tfId, htfBars }),
+    [patterns, symbolName, tfId, htfBars],
   );
 
   const [collapsed, setCollapsed] = useState(false);

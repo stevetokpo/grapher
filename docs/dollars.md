@@ -45,6 +45,27 @@ motif ne trie rien et il en sort beaucoup — d'où les deux filtres ci-dessous.
 transposable d'un symbole à l'autre. 100 = égalité stricte des hauteurs, quasi
 rien sur données réelles ; viser 95–98 pour « indistinguables à l'œil ».
 
+### La 3ᵉ bougie du 2ᵉ FVG, inversée
+
+`reverseThird` (éteint par défaut) : la bougie qui **referme le second gap** doit
+clôturer à **contre-sens** de l'impulsion qui vient de le creuser.
+
+| paire | 2ᵉ impulsion | 3ᵉ bougie exigée |
+|---|---|---|
+| haussière → baissière | baissière | **haussière** |
+| baissière → haussière | haussière | **baissière** |
+
+Le marché ne se contente pas de s'arrêter : il **rend déjà du terrain**. C'est le
+premier signe que la pointe est finie plutôt qu'en pause — la même idée que
+l'ancien `superFVG` du rFVG, appliquée au seul motif qu'on joue.
+
+Cette bougie est aussi la **5ᵉ de la figure**, celle qui la rend connue : la
+condition ne coûte donc **aucune bougie d'attente** supplémentaire. Un doji est
+refusé (il ne rend rien).
+
+C'est une **condition de la paire** : elle vaut pour les **cinq dessins** et pour
+les **positions**.
+
 ### Le filtre de RSI — l'extrême avant l'impulsion
 
 `rsiPeriod` (0 = off, mettre **7**), `rsiOversold` (**≤ 20**), `rsiOverbought`
@@ -70,6 +91,36 @@ ne conclut pas et la paire est écartée.
 Chaque paire porte `rsiIdx` et `rsiValue` — la bougie jugée et sa valeur —, pour
 relire la décision sans refaire le calcul.
 
+### Le filtre de distance à la MM
+
+`maDistPeriod` (200, 0 = off) : de combien la **pointe** s'est écartée d'une
+moyenne mobile, mesurée au départ du trait extrême.
+
+> **Signée dans le sens de la POINTE**, pas dans celui des prix. Une pointe haute
+> qui dépasse la MM de 12 et une pointe basse qui la creuse de 12 rendent toutes
+> deux **+12** — sans quoi il faudrait retourner le chiffre de tête à chaque
+> figure. Négatif veut donc dire : la pointe n'a pas atteint la moyenne.
+
+`maDistMode` choisit **un seul** seuil — `off` / `min` / `max` —, appliqué à la
+**valeur absolue** de l'écart. Un plancher et un plafond ne se règlent pas
+ensemble : le choix unique rend l'état incohérent impossible à écrire, et les
+deux valeurs restent mémorisées séparément.
+
+**C'est une condition, pas un affichage** : le seuil retire la figure partout —
+zones, tous les dessins, et **positions**. Sans mesure possible (moyenne pas
+encore chaude), une figure ne peut pas passer un seuil : elle est écartée plutôt
+que devinée.
+
+Le dessin, lui, ne montre la mesure que là où le trait extrême existe (`extreme`
+et `nuage`) : un **trait gris fin** relie les deux prix, **coupé en son milieu**
+pour y loger le chiffre — la cote d'un plan technique. Gris exprès : il ne dit
+rien du sens de la figure, seulement une distance. Le nom du motif disparaît
+alors de l'étiquette. En fractal, c'est la MM du **HTF**.
+
+`showMaDist` masque le trait et son chiffre. **Masquer n'éteint pas le filtre** —
+la mesure continue de retirer des figures ; seul `maDistMode: off` l'arrête.
+Quand le trait est masqué, l'étiquette du motif reprend sa place.
+
 **Piège de vocabulaire** : `direction: 'bull'` garde les paires qui *commencent*
 haussières = les pointes hautes = uniquement des **ventes**.
 
@@ -80,12 +131,21 @@ haussières = les pointes hautes = uniquement des **ventes**.
 | valeur | ce qu'on voit |
 |---|---|
 | `boites` | les **deux FVG**, chacun sa couleur de sens |
+| `seconde` | le **2ᵉ FVG seul** — la zone qu'on joue |
 | `trait` | un **segment épais** sur le **pivot** — l'arête que les deux boîtes partagent |
 | `extreme` | le même segment, mais sur la **pointe** — l'autre bout de la bougie partagée |
+| `nuage` | la **bande entre les deux**, en carte de chaleur |
 
 Les deux boîtes ne diffèrent que par leur **profondeur** sous (ou sur) le pivot :
 les dessiner toutes les deux revient à tracer deux fois le même niveau. Les modes
-trait ne gardent que le niveau.
+trait ne gardent que le niveau ; `seconde` garde la boîte qui compte.
+
+**`seconde`** ne montre que le **second** motif — celui qui donne le sens du
+trade et porte le bord d'entrée. Une paire haussière→baissière n'affiche que sa
+zone **baissière**, une paire baissière→haussière que sa zone **haussière**. Le
+premier motif ne sert qu'à faire la pointe. Aucun doublon possible : un motif ne
+peut être le second que d'une seule paire, donc dans une chaîne il apparaît une
+fois (3 boîtes en vue complète → 2 en vue seconde).
 
 **Les deux niveaux sont sur la MÊME bougie — la partagée, celle de la pointe —
 et l'encadrent, un de chaque côté :**
@@ -108,6 +168,68 @@ marché est allé avant de se retourner.
 Techniquement c'est une zone **plate** (top = bottom) : `FvgPrimitive` sait
 qu'une bande sans hauteur se dessine en segment épais, à pleine opacité. Aucune
 seconde primitive à entretenir.
+
+### Le nuage de liquidité
+
+`nuage` couvre la bande **pivot ↔ extrême**, c'est-à-dire exactement l'amplitude
+de la bougie partagée. Ses deux bords n'ont pas le même statut, et le dessin le
+dit — un rectangle uniforme l'aurait tu :
+
+- **Bord chaud = l'extrême**, la butée que le marché n'a pas dépassée : une
+  arête lumineuse, puis la densité s'effondre vers le pivot.
+- **Une seule couleur, deux couches.** Le corps, puis la **même** teinte
+  repassée en additif sur le tiers proche du mur : elle se sature et rayonne,
+  sans jamais se délaver. Aucun mélange vers le blanc, aucun empilement de
+  traits — le mur est **un** filet.
+- **Une courbe en S**, jamais une droite ni une puissance nue : la première donne
+  un dégradé de tableur, la seconde écrase tout contre le bord.
+- **Stries fines et jointives** (2 px, jusqu'à 72) : assez petites pour qu'on ne
+  les compte pas, assez présentes pour donner l'échelle de prix.
+- **Aucune variation aléatoire.** Sur une bande de cette taille, le hasard ne
+  fait pas « données », il fait sale. Toute la matière vient des courbes.
+- **Amorce** : une verticale claire sur la bougie d'origine, qui s'éteint
+  aussitôt. Elle ancre le nuage sans déborder à gauche du départ.
+- **Étiquette hors de la bande**, du côté du mur : posée dedans, elle se bat
+  avec la lueur.
+- Le curseur **Opacité** pilote l'intensité générale, comme pour les boîtes.
+
+#### Le mode fractal
+
+`fractal` + `fractalHtf` (M15 par défaut) : la figure est détectée sur des
+bougies de l'**unité supérieure**, reconstruites depuis celles du graphe, puis
+dessinée sur l'échelle de temps courante. On voit le motif tel qu'il est en M15 —
+mêmes prix, extension comptée en bougies M15 donc **15 fois plus large** — sans
+quitter le détail M1. C'est un **zoom sur une figure du HTF**, pas une figure du
+LTF.
+
+> **C'est un affichage, et rien d'autre.** Les positions restent calculées sur
+> les bougies du graphe. Voir une figure M15 en tradant en M1 est l'intérêt du
+> mode ; croire que la gestion a suivi serait coûteux.
+
+**La bougie qui confirme** (`confirmTime`) est marquée d'un **cran vertical** sur
+le nuage : c'est le premier instant où l'on avait le droit de voir cette zone. À
+gauche du cran, le nuage est dessiné sur des bougies qui l'ont **précédé**. En
+fractal l'écart vaut tout un bucket HTF — sans le repère on croirait la figure
+connue quinze bougies trop tôt. Hors fractal, c'est simplement la 5ᵉ bougie de la
+figure.
+
+Deux précautions, non décoratives :
+
+- **La bougie HTF en cours est écartée.** Un motif détecté sur un bucket non
+  clôturé se déformerait à chaque tick puis disparaîtrait — du repaint pur.
+- **Les temps sont ramenés sur des bougies qui existent.** Un début de bucket
+  n'a pas toujours de bougie sur le LTF (week-end, séance fermée, trou de
+  données) ; la primitive rendrait `null` et la zone disparaîtrait sans un mot.
+
+Code : `lib/dollars/fractal.js` (générique — il rejoue n'importe lequel des
+détecteurs de dessin) et `htfOhlcFromCandles` dans `lib/htf.js`.
+
+Rendu par `components/charts/CloudPrimitive.js` : un dégradé horizontal construit
+une fois par zone (le vieillissement), repeint en N bandes à opacité décroissante
+(la densité). Le croisement des deux donne un champ 2D pour le prix d'un seul
+objet de dégradé — c'est ce qui permet d'en afficher des dizaines sans ramer.
+C'est la **seule** vue qui a besoin de sa propre primitive ; le graphe détache
+l'ancienne avant d'attacher l'autre quand on change de mode.
 
 ---
 
@@ -294,8 +416,17 @@ selon le seul calendrier des lots. Inerte à lot 1.
 
 ## 9. Ce que /rapports mesure vraiment
 
-- **Points cumulés** = somme des profits **nets** des positions résolues (TP, SL,
+- **Résultat cumulé** = somme des profits **nets** des positions résolues (TP, SL,
   BE, durée), triée par heure d'**entrée**.
+- **On parle en $.** Le rapport ne contient que des points ; le **prix du point**
+  réglé en haut de page (« 20 pts = 100 $ », **1 pt = 1 $ par défaut**, retenu
+  dans le stockage local) les convertit **à l'affichage seulement** — rien n'est
+  recalculé, c'est un facteur. En **$** : espérance, résultat net, gain et perte
+  moyens, drawdown, courbe, profits des positions, espérance des deux études. En
+  **points** : tout ce qui est une distance de prix — risque, TP, excursions,
+  déclencheur de BE, plafond de stop —, parce que ces chiffres se reportent tels
+  quels dans les panneaux. Les **ratios** (winrate, facteur de profit, seuil de
+  rentabilité, RR) ne bougent pas : le facteur est en haut comme en bas.
 - Tant que rien ne se chevauche, c'est la suite des encaissements d'un compte.
   Dès qu'il y a chevauchement — **la page l'affiche** —, le **drawdown max est
   optimiste** : un compte unique aurait porté ces pertes ensemble.

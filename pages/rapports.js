@@ -5,15 +5,29 @@
 // tableau `positions` et un `params.tpPts`, ce que produisent aussi bien le
 // rapport rFVG que le rapport KO ou celui de la pince liq.
 //
-// TOUT SE COMPTE EN POINTS. Le stop de ces stratégies est STRUCTUREL — sous ou
-// sur l'extrême de bougies du motif, que ce soit les deux dernières (rFVG, KO) ou
-// toutes (liq) : le risque varie fortement d'une position à
-// l'autre. Le lot, lui, est FIXE — c'est donc le gain en points qui est
-// proportionnel au résultat réel. Compter en R supposerait qu'on redimensionne
-// la position à chaque trade pour risquer le même montant, ce que la stratégie
-// ne fait pas. Le seuil de rentabilité affiché est celui effectivement réalisé
-// (perte moyenne / (gain moyen + perte moyenne)), pas un 1/(1+RR) qui n'a de
-// sens qu'à risque constant.
+// L'ARGENT SE COMPTE EN DOLLARS, LES DISTANCES EN POINTS. Le rapport, lui, ne
+// contient que des points : le PRIX DU POINT réglé en haut de page (« 20 pts =
+// 100 $ », 1 pt = 1 $ par défaut) les convertit à l'affichage. Rien n'est
+// recalculé — c'est un facteur, appliqué au rendu seulement, et le seul endroit
+// où il vit est cette page.
+//   • en $  : tout ce qui est un RÉSULTAT — espérance, résultat net, gain et
+//     perte moyens, drawdown, courbe cumulée, profits des positions, et
+//     l'espérance des deux études ;
+//   • en pts : tout ce qui est une DISTANCE DE PRIX — risque, TP, excursions,
+//     déclencheur de break-even, plafond de stop. Ces chiffres se reportent tels
+//     quels dans les panneaux de réglage, les convertir les rendrait inutiles.
+// Les ratios (winrate, facteur de profit, seuil de rentabilité, RR) ne changent
+// pas : le prix du point les multiplie en haut comme en bas.
+//
+// Le stop de ces stratégies est STRUCTUREL — sous ou sur l'extrême de bougies du
+// motif, que ce soit les deux dernières (rFVG, KO) ou toutes (liq) : le risque
+// varie fortement d'une position à l'autre. Le lot, lui, est FIXE — c'est donc le
+// gain en points, converti en $ à taux constant, qui est proportionnel au
+// résultat réel. Compter en R supposerait qu'on redimensionne la position à
+// chaque trade pour risquer le même montant, ce que la stratégie ne fait pas. Le
+// seuil de rentabilité affiché est celui effectivement réalisé (perte moyenne /
+// (gain moyen + perte moyenne)), pas un 1/(1+RR) qui n'a de sens qu'à risque
+// constant.
 //
 // Les deux études s'appuient sur les excursions du rapport et affichent des
 // BORNES, pas des vérités : l'ordre intra-vie des excursions est inconnu.
@@ -25,11 +39,15 @@
 //     le plafond est comptée tuée — pessimiste, la chaleur est supposée venir
 //     avant le TP ; une perdante ne coûte plus que le plafond.
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import styles from '../styles/rapports.module.css';
 import { computeStats } from '../lib/signals/stats';
+import MonteCarloCard from '../components/rapports/MonteCarloCard';
+import {
+  fmtDate, fmtPct, fmtNum, fmtUsd, fmtAbs, fmtRate, fmtP, fmtTick, fmtPF,
+} from '../lib/reportFormat';
 
 const BULL   = '#26A69A';
 const BEAR   = '#EF5350';
@@ -51,20 +69,12 @@ const STATUS_META = {
   open:    { label: 'Ouverte', color: BLUE },
 };
 
-const fmtDate = iso => {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })
-    + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-};
-// Le P&L se compte en POINTS : le lot est fixe, c'est lui qui est
-// proportionnel au gain réel. Le R supposerait une position redimensionnée
-// à chaque trade pour risquer le même montant.
-const fmtP   = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(1)} pts`;
-const fmtPct = v => v == null ? '—' : `${(v * 100).toFixed(1)} %`;
-const fmtNum = (v, d = 2) => v == null ? '—' : v.toFixed(d);
-// Facteur de profit : ∞ quand il n'y a aucune perte — le dire plutôt que le taire.
-const fmtPF  = v => v == null ? '—' : (Number.isFinite(v) ? v.toFixed(2) : '∞');
+// ── Argent ───────────────────────────────────────────────────────────────────
+// Le rapport ne contient QUE des points ; le prix du point les convertit à
+// l'affichage. Les FORMATEURS eux-mêmes vivent dans lib/reportFormat.js depuis
+// que la carte Monte-Carlo a eu besoin des mêmes : deux jeux auraient fini par
+// écrire deux nombres différents pour la même valeur, dans la même page.
+const PV_KEY = 'grapher.rapports.pointValue';
 // Max par réduction : Math.max(...tableau) fait sauter la pile d'appel dès
 // quelques dizaines de milliers d'éléments, ce qu'un rapport 1m atteint.
 const maxOf  = (floor, a) => a.reduce((m, v) => v > m ? v : m, floor);
@@ -80,7 +90,9 @@ function Tile({ label, value, sub, color }) {
   );
 }
 
-// ── Courbe de points cumulés (positions résolues, dans l'ordre d'entrée) ────
+// ── Courbe du résultat cumulé, en $ (positions résolues, ordre d'entrée) ────
+// Les points arrivent DÉJÀ convertis : le prix du point est un facteur constant,
+// la forme de la courbe ne change donc pas, seule l'échelle le fait.
 function EquityChart({ points }) {
   const [hover, setHover] = useState(null);
   const W = 1080, H = 220, PL = 46, PR = 12, PT = 12, PB = 26;
@@ -115,12 +127,15 @@ function EquityChart({ points }) {
             <line x1={PL} x2={W - PR} y1={y(t)} y2={y(t)}
               stroke={t === 0 ? 'rgba(148,163,184,0.35)' : 'rgba(26,37,64,0.8)'}
               strokeWidth="1" strokeDasharray={t === 0 ? '' : '3,4'} />
-            <text x={PL - 7} y={y(t) + 3} textAnchor="end" className={styles.axisLabel}>{t}</text>
+            <text x={PL - 7} y={y(t) + 3} textAnchor="end" className={styles.axisLabel}>{fmtTick(t)}</text>
           </g>
         ))}
         <path d={`${path}L${x(points.length - 1)},${y(Math.max(0, yMin))}L${x(0)},${y(Math.max(0, yMin))}Z`}
           fill={BLUE} opacity="0.07" />
         <path d={path} fill="none" stroke={BLUE} strokeWidth="2" strokeLinejoin="round" />
+        {/* L'unité est en bas à gauche : au-dessus de l'axe elle tomberait pile
+            sur la graduation du maximum. */}
+        <text x={PL - 7} y={H - PB + 12} textAnchor="end" className={styles.axisLabel}>$</text>
         <text x={W - PR} y={H - 8} textAnchor="end" className={styles.axisLabel}>
           positions résolues, dans l'ordre d'entrée →
         </text>
@@ -136,7 +151,7 @@ function EquityChart({ points }) {
       {hover && (
         <div className={styles.chartTooltip} style={{ left: hover.left, top: hover.top }}>
           #{points[hover.i].id} · {fmtDate(points[hover.i].date)}<br />
-          trade {fmtP(points[hover.i].r)} · cumul <b>{fmtP(points[hover.i].cum)}</b>
+          trade {fmtUsd(points[hover.i].r)} · cumul <b>{fmtUsd(points[hover.i].cum)}</b>
         </div>
       )}
     </div>
@@ -199,6 +214,35 @@ function Histogram({ values, color, maxX, unit = 'pts' }) {
   );
 }
 
+// ── Prix du point ────────────────────────────────────────────────────────────
+// « 20 pts = 100 $ » plutôt qu'un seul champ « $ par point » : c'est la forme
+// dans laquelle un broker l'annonce, et 20 → 100 se lit sans diviser de tête.
+// Les deux champs restent des CHAÎNES tant qu'on tape — un champ vidé doit
+// pouvoir l'être, ce qu'un nombre contrôlé interdit.
+function PointValueBar({ pv, onChange, ppp }) {
+  const set = (k, v) => onChange({ ...pv, [k]: v });
+  const dflt = ppp === 1;
+  return (
+    <div className={styles.pvBar}>
+      <span className={styles.pvLabel}>Prix du point</span>
+      <input className={styles.pvInput} type="number" min="0" step="any" value={pv.pts}
+        onChange={e => set('pts', e.target.value)} aria-label="points" />
+      <span className={styles.pvOp}>pts =</span>
+      <input className={styles.pvInput} type="number" step="any" value={pv.usd}
+        onChange={e => set('usd', e.target.value)} aria-label="dollars" />
+      <span className={styles.pvOp}>$</span>
+      <span className={styles.pvOut}>
+        soit <b>{fmtRate(ppp)} $</b> le point{dflt && ' (défaut)'}
+      </span>
+      {!dflt && (
+        <button className={styles.pvReset} onClick={() => onChange({ pts: '1', usd: '1' })}>
+          1 pt = 1 $
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function RapportsPage() {
   const inputRef = useRef(null);
@@ -209,6 +253,30 @@ export default function RapportsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortKey,  setSortKey]  = useState({ key: 'entryTime', dir: 1 });
   const [maxRows,  setMaxRows]  = useState(200);
+  // Prix du point : 1 pt = 1 $ par défaut, donc un rapport déposé sans y toucher
+  // s'affiche avec les chiffres du rapport. Relu du stockage APRÈS le montage et
+  // pas dans l'initialisation d'état : lu côté serveur, localStorage n'existe pas,
+  // et une valeur enregistrée ferait diverger le premier rendu de l'hydratation.
+  const [pv, setPv] = useState({ pts: '1', usd: '1' });
+  useEffect(() => {
+    try {
+      const o = JSON.parse(localStorage.getItem(PV_KEY) ?? 'null');
+      if (o && o.pts != null && o.usd != null) setPv({ pts: String(o.pts), usd: String(o.usd) });
+    } catch { /* stockage illisible ou refusé : on garde 1 pt = 1 $ */ }
+  }, []);
+  const changePv = next => {
+    setPv(next);
+    try { localStorage.setItem(PV_KEY, JSON.stringify(next)); } catch { /* idem */ }
+  };
+  // Le facteur. Un champ vide ou absurde retombe sur 1 plutôt que sur NaN ou une
+  // division par zéro : la page continue d'afficher des chiffres pendant la
+  // frappe, et le champ vide se voit à l'écran.
+  const ppp = useMemo(() => {
+    const pts = Number(pv.pts), usd = Number(pv.usd);
+    return pts > 0 && Number.isFinite(usd) ? usd / pts : 1;
+  }, [pv]);
+  // Points → dollars. Le seul endroit où la conversion se fait.
+  const usd = v => v == null ? null : v * ppp;
 
   const loadFile = file => {
     if (!file) return;
@@ -313,6 +381,31 @@ export default function RapportsPage() {
     });
   }, [d, statusFilter, sortKey]);
 
+  // La courbe se trace en $. La conversion vit ICI, hors du calcul des stats :
+  // changer le prix du point ne doit pas rejouer tout le rapport.
+  const equityUsd = useMemo(
+    () => d ? d.equity.map(pt => ({ ...pt, r: pt.r * ppp, cum: pt.cum * ppp })) : [],
+    [d, ppp],
+  );
+
+  // LA SÉRIE DONNÉE AU MONTE-CARLO : les résultats nets par position résolue,
+  // en POINTS et dans l'ordre d'entrée — le même ordre, les mêmes chiffres que
+  // la courbe ci-dessus. En points et pas en dollars, exprès : la simulation est
+  // linéaire en son entrée, donc convertir avant reviendrait à la rejouer
+  // entièrement à chaque frappe dans le champ « prix du point ».
+  //
+  // À 1 LOT dès que les tailles varient. Rebattre des résultats déjà multipliés
+  // par un lot en escalier accrocherait le lot du 300e trade au résultat du 12e :
+  // ce serait mesurer le calendrier des lots, pas la stratégie. Tant que le lot
+  // vaut 1 partout — c'est-à-dire partout sauf en escalier — les deux séries
+  // sont le même tableau.
+  const mcGains = useMemo(() => {
+    if (!d) return [];
+    if (!d.lotsVarient) return d.equity.map(pt => pt.r);
+    const byId = new Map(d.pos.map(p => [p.id, p]));
+    return d.equity.map(pt => byId.get(pt.id)?.netPoints1 ?? pt.r);
+  }, [d]);
+
   const sortBy = key => setSortKey(s => ({ key, dir: s.key === key ? -s.dir : -1 }));
 
   const COLS = [
@@ -322,7 +415,7 @@ export default function RapportsPage() {
     ...(d?.lotsVarient ? [['lot', 'Lot']] : []),
     ['risk0', 'Risque (pts)'], ['rr', 'RR'], ['barsHeld', 'Durée (bougies)'], ['entryTouches', "Retours sur l'entrée"],
     ['entryPrice', 'Prix entrée'], ['exitPrice', 'Prix sortie'],
-    ['profitPoints', 'Profit brut (pts)'], ['netPoints', 'Profit net (pts)'],
+    ['profitPoints', 'Profit brut ($)'], ['netPoints', 'Profit net ($)'],
     ['maxPullupPts', 'Pullup max (pts)'], ['maxDrawdownPts', 'Drawdown max (pts)'],
   ];
 
@@ -379,6 +472,11 @@ export default function RapportsPage() {
         </div>
       ) : d && (
         <main className={styles.main}>
+          {/* Prix du point : il commande toute la colonne des $ ci-dessous, donc
+              il est en HAUT — un facteur qu'on découvre après avoir lu les
+              chiffres est un facteur qu'on n'a pas appliqué. */}
+          <PointValueBar pv={pv} onChange={changePv} ppp={ppp} />
+
           {/* Paramètres du run */}
           <div className={styles.chips}>
             {Object.entries(d.params).map(([k, v]) => (
@@ -391,7 +489,7 @@ export default function RapportsPage() {
           {d.lotsVarient && (
             <p className={styles.cardSub} style={{ marginTop: -4 }}>
               <b style={{ color: AMBER }}>Taille de position variable</b> (jusqu'à <b>×{d.lotMax}</b>) :
-              deux unités cohabitent ci-dessous. <b>Points nets</b>, la <b>courbe cumulée</b> et le
+              deux lectures cohabitent ci-dessous. Le <b>résultat net</b>, la <b>courbe cumulée</b> et le
               {' '}<b>drawdown max</b> sont ceux du <b>compte</b>, lot compris — c'est ce qui a été
               gagné. Le <b>gain moyen</b>, la <b>perte moyenne</b>, le <b>facteur de profit</b>,
               {' '}l'<b>espérance</b>, le <b>seuil de rentabilité</b> et les <b>deux études</b> sont
@@ -429,34 +527,42 @@ export default function RapportsPage() {
             <Tile label="Winrate" value={fmtPct(d.winrate)}
               color={d.winrate != null && d.be != null ? (d.winrate >= d.be ? BULL : BEAR) : undefined}
               sub={d.be != null ? `TP/(TP+SL) · seuil de rentabilité réalisé : ${fmtPct(d.be)}` : 'TP/(TP+SL)'} />
-            {/* Le TP affiché est la MÉDIANE de ce que les positions ont visé, pas
+            {/* EN POINTS, et pas en $ : c'est une distance de prix, elle se
+                reporte telle quelle dans un panneau de réglage. Sa contrepartie
+                en argent est dite en sous-titre quand le point ne vaut pas 1 $.
+                Le TP affiché est la MÉDIANE de ce que les positions ont visé, pas
                 le réglage : les deux coïncident à objectif fixe et divergent dès
                 qu'il varie (TP en ATR, dû armé, cible repoussée). */}
             <Tile label="Risque médian" value={d.riskMed != null ? `${fmtNum(d.riskMed, 1)} pts` : '—'}
-              sub={d.risks.length
+              sub={(d.risks.length
                 ? `TP médian ${fmtNum(d.tpPts, 1)} pts · risque de ${fmtNum(d.risks[0], 1)} à ${fmtNum(d.risks[d.risks.length - 1], 1)} pts`
-                : `TP médian ${fmtNum(d.tpPts, 1)} pts`} />
+                : `TP médian ${fmtNum(d.tpPts, 1)} pts`)
+                + (ppp !== 1 && d.riskMed != null ? ` · soit ${fmtAbs(usd(d.riskMed))} de risque médian` : '')} />
             {/* Le spread n'est PAS supposé nul : le simulateur l'applique
                 position par position et le rapport porte le net. La tuile disait
                 « spread 0 » alors qu'elle affichait déjà du net — elle dit
                 maintenant ce que le rapport contient. */}
-            <Tile label="Espérance" value={fmtP(d.expPts)}
+            <Tile label="Espérance" value={fmtUsd(usd(d.expPts))}
               color={d.expPts != null ? (d.expPts >= 0 ? BULL : BEAR) : undefined}
               sub={`par position résolue${d.beOn ? ', BE incl.' : ''} · net`
-                + ((d.params.spreadPts ?? 0) > 0 ? `, spread ${d.params.spreadPts} pts` : ', spread 0')} />
+                + ((d.params.spreadPts ?? 0) > 0 ? `, spread ${d.params.spreadPts} pts` : ', spread 0')
+                + (ppp !== 1 && d.expPts != null ? ` · ${fmtP(d.expPts)}` : '')} />
           </div>
 
-          {/* Performance — tout en points : le lot est fixe */}
+          {/* Performance — les RÉSULTATS en $, au prix du point réglé ci-dessus */}
           <div className={styles.tiles}>
+            {/* Un RATIO : le prix du point multiplie le numérateur comme le
+                dénominateur, il ne le bouge pas d'un iota. */}
             <Tile label="Facteur de profit" value={fmtPF(d.profitFactor)}
               color={d.profitFactor != null ? (d.profitFactor >= 1 ? BULL : BEAR) : undefined}
-              sub="gains bruts / pertes brutes, en points" />
-            <Tile label="Points nets" value={fmtP(d.netPts)}
+              sub="gains bruts / pertes brutes — inchangé par le prix du point" />
+            <Tile label="Résultat net" value={fmtUsd(usd(d.netPts))}
               color={d.netPts >= 0 ? BULL : BEAR}
-              sub={`${d.nWin} gagnante(s) · ${d.nLoss} perdante(s)`} />
-            <Tile label="Gain moyen" value={fmtP(d.avgWin)} color={BULL}
-              sub={d.avgLoss != null ? `perte moyenne ${fmtP(-d.avgLoss)}` : 'aucune perte'} />
-            <Tile label="Drawdown max" value={fmtP(-d.maxDD)} color={BEAR}
+              sub={`${d.nWin} gagnante(s) · ${d.nLoss} perdante(s)`
+                + (ppp !== 1 ? ` · ${fmtP(d.netPts)}` : '')} />
+            <Tile label="Gain moyen" value={fmtUsd(usd(d.avgWin))} color={BULL}
+              sub={d.avgLoss != null ? `perte moyenne ${fmtUsd(usd(-d.avgLoss))}` : 'aucune perte'} />
+            <Tile label="Drawdown max" value={fmtUsd(usd(-d.maxDD))} color={BEAR}
               sub="creux maximal de la courbe cumulée" />
             <Tile label="Pertes d'affilée" value={d.maxLossStreak}
               sub="plus longue série, ordre d'entrée" />
@@ -486,12 +592,13 @@ export default function RapportsPage() {
                 : 'aucune position résolue'} />
           </div>
 
-          {/* Courbe de points cumulés */}
+          {/* Courbe du résultat cumulé, en $ */}
           <section className={styles.card}>
-            <h2 className={styles.cardTitle}>Points cumulés</h2>
+            <h2 className={styles.cardTitle}>Résultat cumulé <span style={{ color: 'var(--text-dim)', fontWeight: 500 }}>— en $</span></h2>
             <p className={styles.cardSub}>
-              Somme des profits <b>nets</b> en points des positions résolues (TP, SL, BE et sorties
-              en durée), dans l'ordre chronologique d'<b>entrée</b>. Le spread est déjà déduit :
+              Somme des profits <b>nets</b> des positions résolues (TP, SL, BE et sorties
+              en durée), dans l'ordre chronologique d'<b>entrée</b>, convertie à
+              {' '}<b>{fmtRate(ppp)} $ le point</b>. Le spread est déjà déduit :
               c'est le net qui est tracé, pas le brut. Lot fixe : chaque point pèse pareil, quel que
               soit le risque de la position.
               {d.maxSim > 1 ? (
@@ -505,8 +612,13 @@ export default function RapportsPage() {
                 encaissements d'un compte unique.</>
               )}
             </p>
-            <EquityChart points={d.equity} />
+            <EquityChart points={equityUsd} />
           </section>
+
+          {/* Monte-Carlo — juste sous la courbe, parce qu'il ne parle que d'elle :
+              ce que ce chemin-là aurait pu être si les trades étaient tombés
+              dans un autre ordre. */}
+          <MonteCarloCard gains={mcGains} ppp={ppp} maxSim={d.maxSim} lotsVarient={d.lotsVarient} />
 
           {/* Distributions d'excursions */}
           <div className={styles.twoCol}>
@@ -540,8 +652,9 @@ export default function RapportsPage() {
                 SL remonté à l'entrée dès que le profit atteint le déclencheur, exprimé en
                 points — reportable tel quel dans le panneau. Les perdantes sauvées sont
                 certaines (leur pullup exclut la bougie du stop) ; les gagnantes sont supposées
-                intactes, ce qui est optimiste. Compté en points, sauver une grosse perdante
-                rapporte plus que sauver une petite.
+                intactes, ce qui est optimiste. L'espérance de chaque palier est en <b>$</b> ;
+                le déclencheur, lui, reste en points — sauver une grosse perdante rapporte plus
+                que sauver une petite.
                 {d.beOn && (
                   <> <b style={{ color: AMBER }}>Ce rapport a déjà un BE appliqué</b>
                   {' '}({[
@@ -560,17 +673,17 @@ export default function RapportsPage() {
                 )}
               </p>
               <table className={styles.studyTable}>
-                <thead><tr><th>Déclencheur</th><th>Perdantes sauvées</th><th>%</th><th>Espérance</th></tr></thead>
+                <thead><tr><th>Déclencheur</th><th>Perdantes sauvées</th><th>%</th><th>Espérance ($)</th></tr></thead>
                 <tbody>
                   <tr className={styles.baseRow}>
-                    <td>sans BE</td><td>—</td><td>—</td><td>{fmtP(d.expWL)}</td>
+                    <td>sans BE</td><td>—</td><td>—</td><td>{fmtUsd(usd(d.expWL))}</td>
                   </tr>
                   {d.beStudy.map(r => (
                     <tr key={r.t} className={r === d.bestBe ? styles.bestRow : ''}>
                       <td>{fmtNum(r.t, 1)} pts</td>
                       <td>{r.saved} / {d.sl}</td>
                       <td>{fmtPct(r.pct)}</td>
-                      <td>{fmtP(r.exp)}</td>
+                      <td>{fmtUsd(usd(r.exp))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -584,17 +697,18 @@ export default function RapportsPage() {
                 TP) ; une perdante ne coûte plus que le plafond. La chaleur lue est celle de la
                 fenêtre où le stop existe (B5 → sortie) : pendant B4 la position n'est pas
                 protégée, aucun plafond ne s'y déclencherait. Les paliers suivent les déciles du
-                risque observé — au dernier, plus rien n'est plafonné.
+                risque observé — au dernier, plus rien n'est plafonné. Le plafond est une distance,
+                donc en points ; l'espérance qu'il produit est en <b>$</b>.
               </p>
               <table className={styles.studyTable}>
-                <thead><tr><th>Plafond</th><th>Positions rognées</th><th>Gagnantes tuées</th><th>Espérance</th></tr></thead>
+                <thead><tr><th>Plafond</th><th>Positions rognées</th><th>Gagnantes tuées</th><th>Espérance ($)</th></tr></thead>
                 <tbody>
                   {d.slStudy.map((r, i) => (
                     <tr key={r.d} className={r === d.bestSl ? styles.bestRow : (i === d.slStudy.length - 1 ? styles.baseRow : '')}>
                       <td>{fmtNum(r.d, 1)} pts{i === d.slStudy.length - 1 ? ' (aucun)' : ''}</td>
                       <td>{r.capped} / {d.resolved}</td>
                       <td>{r.killed} / {d.tp}</td>
-                      <td>{fmtP(r.exp)}</td>
+                      <td>{fmtUsd(usd(r.exp))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -604,10 +718,14 @@ export default function RapportsPage() {
 
           <p className={styles.caveat}>
             Mesures en échantillon, avec SL prioritaire dans la bougie. Le spread est celui du
-            rapport, déjà déduit position par position : tout ce qui est affiché est du NET. Tout
-            est compté en POINTS : le lot étant fixe, c'est lui qui est proportionnel au gain réel —
-            compter en R supposerait qu'on redimensionne la position à chaque trade pour risquer
-            le même montant. Selon le motif, le risque est constant (stop en points) ou variable
+            rapport, déjà déduit position par position : tout ce qui est affiché est du NET. Le
+            rapport ne contient que des POINTS ; les <b>résultats</b> sont convertis à l'affichage
+            au prix du point réglé en haut ({fmtRate(ppp)} $ le point), les <b>distances</b> — risque,
+            TP, excursions, déclencheur de BE, plafond de stop — restent en points pour se reporter
+            telles quelles dans les panneaux. Le lot étant fixe, le gain en points est
+            proportionnel au gain réel : compter en R supposerait qu'on redimensionne la position à
+            chaque trade pour risquer le même montant. Selon le motif, le risque est constant
+            (stop en points) ou variable
             (stop structurel, stop en ATR) : la tuile « Risque médian » en donne l'étendue, et le
             seuil de rentabilité affiché est celui effectivement réalisé, tiré des gains et pertes
             moyens — jamais un 1/(1+RR), qui n'aurait de sens qu'à risque constant.
@@ -675,12 +793,12 @@ export default function RapportsPage() {
                         <td>{fmtNum(p.entryPrice, 2)}</td>
                         <td>{fmtNum(p.exitPrice, 2)}</td>
                         <td style={{ color: p.status === 'missed' ? 'var(--text-dim)' : p.status === 'be' ? AMBER : (p.profitPoints ?? 0) >= 0 ? BULL : BEAR }}>
-                          {p.status === 'missed' ? '—' : fmtP(p.profitPoints)}
+                          {p.status === 'missed' ? '—' : fmtUsd(usd(p.profitPoints))}
                         </td>
                         {/* Net = brut − spread de CETTE position. Absent des
                             rapports antérieurs au champ : tiret, pas un faux zéro. */}
                         <td style={{ color: p.netPoints == null || p.status === 'missed' ? 'var(--text-dim)' : p.netPoints >= 0 ? BULL : BEAR }}>
-                          {p.status === 'missed' || p.netPoints == null ? '—' : fmtP(p.netPoints)}
+                          {p.status === 'missed' || p.netPoints == null ? '—' : fmtUsd(usd(p.netPoints))}
                         </td>
                         <td>{p.maxPullupPts   != null ? fmtNum(p.maxPullupPts, 1)   : '—'}</td>
                         <td>{p.maxDrawdownPts != null ? fmtNum(p.maxDrawdownPts, 1) : '—'}</td>

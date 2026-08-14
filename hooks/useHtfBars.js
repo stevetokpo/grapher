@@ -12,8 +12,14 @@ import { mergeHtfRequests } from '../lib/htf';
 //
 // Les bougies du graphe sont paginées (500 par page) et une Bollinger 50 en H16
 // réclame ~34 jours d'historique : reconstruire la série HTF depuis ce qui est
-// affiché la laisserait vide. On va donc la chercher directement, et elle est
-// minuscule (quelques dizaines de bougies).
+// affiché la laisserait vide. On va donc la chercher directement.
+//
+// La requête est bornée des DEUX côtés (`from`/`to`) : elle couvre exactement la
+// fenêtre chargée plus le préchauffage, et rien de plus. Sa taille suit donc le
+// rapport entre le TF du graphe et le HTF — quelques dizaines de bougies pour un
+// H16, beaucoup plus pour un M5 lu depuis un M1 chargé loin. C'est voulu : un
+// plafond fixe tronquerait la série par son côté ancien, et les bougies non
+// couvertes ne porteraient plus aucune zone, en silence.
 //
 // Causalité : chaque requête est bornée au début du bucket HTF courant, donc à
 // des bougies HTF déjà CLÔTURÉES et antérieures à la dernière bougie du graphe.
@@ -36,7 +42,7 @@ export function useHtfBars(symbolId, indicators, patterns, candles) {
   // Une clé stable : sans elle, le tableau `reqs` étant recréé à chaque rendu,
   // l'effet se relancerait en boucle.
   const key = useMemo(
-    () => reqs.map(r => `${r.key}:${r.sec}:${r.off}:${r.to}:${r.limit}`).join('|'),
+    () => reqs.map(r => `${r.key}:${r.sec}:${r.off}:${r.from}:${r.to}:${r.limit}`).join('|'),
     [reqs],
   );
 
@@ -48,7 +54,7 @@ export function useHtfBars(symbolId, indicators, patterns, candles) {
     Promise.all(
       reqs.map(r =>
         fetch(
-          `/api/htf?symbolId=${symbolId}&sec=${r.sec}&off=${r.off}&to=${r.to}&limit=${r.limit}`,
+          `/api/htf?symbolId=${symbolId}&sec=${r.sec}&off=${r.off}&from=${r.from}&to=${r.to}&limit=${r.limit}`,
           { signal: ctrl.signal },
         )
           .then(res => res.json())

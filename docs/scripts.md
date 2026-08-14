@@ -39,6 +39,7 @@ n'a qu'un seul endroit — `fmtUsd()` dans `lib/format.js`, alimenté par
 | `lib/scripts/registry.js` | Le registre — un script s'y ajoute en une ligne |
 | `lib/scripts/lotLadder.js` | L'escalier des lots — la taille qui monte avec le compte, et son formulaire |
 | `lib/scripts/library/*.js` | Les scripts eux-mêmes |
+| `lib/scripts/library/boomRsier.js` | Vend les surventes RSIER sur Boom 1000 M1, poche chez le broker et gains en réserve — voir `docs/boom-rsier.md` |
 | `lib/scripts/library/ringble.js` | Joue le motif ringble **du graphe** — voir « Un script qui joue un motif » |
 | `lib/scripts/library/rfvgPaliers.js` | Joue le rFVG **du graphe**, sorties du moteur commun, taille par escalier |
 | `components/ScriptPanel.js` | Le tiroir : choix du script, compte, date de départ, réglages, lancement |
@@ -195,9 +196,17 @@ api.modify(pos, { sl, tp })   // un stop porté au-delà de l'entrée marque `be
 api.cancel(orderId) / api.cancelAll()
 
 // Compte et dimensionnement
-api.account            // { balance, equity, usedMargin, freeMargin, marginLevel, floating, openCount }
+api.account            // { balance, equity, wealth, usedMargin, freeMargin, marginLevel,
+                       //   floating, openCount, external, deposits, withdrawals, absorbed,
+                       //   cfg: { pointValue, marginPerLot, spreadPts, slipPct, minLot, … } }
 api.lotsForRisk(riskPct, stopPoints)
 api.normalizeLots(lots) / api.canAfford(lots)
+
+// Caisse — l'argent qui SORT du compte n'est plus exposé : ni au flottant, ni à
+// la marge, ni au stop out. C'est la différence entre « j'ai 500 $ » et « j'ai
+// 500 $ dont 7,50 chez le broker ». `withdraw` rend ce qui est vraiment sorti,
+// borné à la marge libre.
+api.withdraw(usd, raison) / api.deposit(usd, raison)
 
 api.log('message')     // apparaît dans l'onglet Journal du résultat
 ```
@@ -246,6 +255,26 @@ niveau        = équité / margeUtilisée × 100
 - **équité ≤ 0** → **ruine**, le script s'arrête là.
 - Un ordre que la marge libre ne permet pas est **refusé et compté** — jamais
   ignoré en silence.
+
+### Le stop qu'on demande et celui qu'on obtient
+
+Un stop est demandé à un prix et servi au premier prix **traité** au-delà. Les
+deux ne se confondent que sur un marché continu. Le réglage de compte
+**« Glissement du stop »** (`slipPct`) dit quelle part du chemin parcouru au-delà
+du stop, dans la bougie qui l'a touché, a réellement été payée : 0 % le niveau
+demandé, 100 % le pire prix de la bougie.
+
+Sur un instrument qui bondit, ce n'est pas un détail de deuxième ordre. Sur Boom
+1000 M1, une bougie de spike porte 59 ticks comme toutes les autres — le bond est
+**un tick** — et clôture à 2 % de son sommet : un stop posé dedans est servi
+après le saut. La même stratégie y rend +3 584 $ à 0 % et +327 $ à 100 %
+(`docs/boom-rsier.md`).
+
+La **protection du solde négatif** (`negProtect`, active par défaut) est celle des
+comptes de détail : une position qui coûte plus que le solde le laisse à zéro,
+pas en dessous. Ce qui a été effacé est compté à part (`pertesEffacees`) — un
+profit net qui n'existe que parce que cette colonne est énorme est un transfert,
+pas un edge.
 
 Le **spread** (aller-retour, en points) et la **commission** (USD par lot) sont
 portés par la position **dès son ouverture** et comptés dans le flottant : une

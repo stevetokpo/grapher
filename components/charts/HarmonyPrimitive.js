@@ -10,10 +10,19 @@
 // passent par les marqueurs d'une série fantôme (cf. TradingChart) : c'est ce
 // que fait déjà SWING, et ça évite de réimplémenter le placement du texte.
 //
+// TROISIÈME COUCHE, FACULTATIVE : la COTE DE DISTANCE à une moyenne mobile, que
+// le RSIER dessine à l'ouverture de sa zone. Une zone qui porte `entryPrice` et
+// `maValue` la fait apparaître, les autres ne changent pas d'un pixel — le
+// TRENDER, qui ne mesure rien, n'a rien à savoir de tout ça. C'est le même trait
+// que celui du $$$, emprunté à CloudPrimitive plutôt que réécrit : deux cotes
+// dessinées par deux codes finiraient par ne plus se ressembler.
+//
 // Usage :
 //   const p = createHarmonyPrimitive();
 //   candleSeries.attachPrimitive(p);
-//   p.update(zones, { bullColor, bearColor, bgTransp, showBg, showSlLn });
+//   p.update(zones, { bullColor, bearColor, bgTransp, showBg, showSlLn, showMaDist });
+
+import { fmtEcart, traitDeMesure } from './CloudPrimitive';
 
 function rgba(hex, a) {
   const h = hex.replace('#', '');
@@ -57,6 +66,20 @@ class HarmonyRenderer {
           ctx.lineTo(x2, y + 0.5);
           ctx.stroke();
         }
+
+        // La cote, sur la bougie qui OUVRE la zone : c'est là qu'on entre, donc
+        // là que la mesure a été prise. Elle se trace en dernier pour rester
+        // au-dessus du fond, et grise — elle ne dit pas un sens, une distance.
+        if (z.xMesure != null) {
+          traitDeMesure(ctx, {
+            x: Math.round(z.xMesure * hr),
+            yA: Math.round(z.yEntry * vr),
+            yB: Math.round(z.yMa * vr),
+            texte: z.ecart,
+            alpha: 0.85,
+            hr, vr,
+          });
+        }
       }
     });
   }
@@ -85,11 +108,24 @@ class HarmonyPaneView {
       const a = ts.timeToCoordinate(z.startTime);
       const b = ts.timeToCoordinate(z.endTime);
       if (a == null || b == null) continue;
+
+      // La cote n'existe que si la zone porte les DEUX prix qu'elle relie. Une
+      // zone sans mesure (TRENDER, ou RSIER dont la moyenne n'est pas encore
+      // chaude) laisse ces champs nuls et rien n'est dessiné.
+      const mesure = opts.showMaDist !== false && z.entryPrice != null && z.maValue != null;
+      const yEntry = mesure ? series.priceToCoordinate(z.entryPrice) : null;
+      const yMa    = mesure ? series.priceToCoordinate(z.maValue)    : null;
+
       out.push({
         side: z.side,
         x1:   a - half,
         x2:   b + half,
         ySl:  z.slLevel != null ? series.priceToCoordinate(z.slLevel) : null,
+        // Sur la bougie d'ouverture, en son centre : `a` est ce centre, x1 en
+        // est le bord gauche.
+        xMesure: yEntry != null && yMa != null ? a : null,
+        yEntry, yMa,
+        ecart: mesure ? fmtEcart(z.maDist) : null,
       });
     }
 

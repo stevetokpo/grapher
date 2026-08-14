@@ -12,9 +12,11 @@
 // Tout est en bougies FABRIQUÉES, à la main, pour que chaque assertion porte sur
 // un cas nommé et non sur ce que le marché a bien voulu produire.
 
-import { calcDollars, calcDollarPivots, detectDollarPairs } from '../lib/dollars/detect.js';
+import { calcDollars, calcDollarSecond, calcDollarPivots, calcDollarClouds, detectDollarPairs } from '../lib/dollars/detect.js';
 import { calcDollarsPositions } from '../lib/dollars/positions.js';
 import { computeStats } from '../lib/signals/stats.js';
+import { createCloudPrimitive } from '../components/charts/CloudPrimitive.js';
+import { fractalZones } from '../lib/dollars/fractal.js';
 
 let fails = 0, total = 0;
 const ok = (cond, name, extra = '') => {
@@ -61,6 +63,44 @@ console.log('\n── DÉTECTION ───────────────�
   ok(near(p.similarity, 60), 'similitude = min/max des hauteurs', String(p.similarity));
   ok(calcDollars(candles, { similarity: 61 }).length === 0, 'un seuil au-dessus écarte la paire');
   ok(calcDollars(candles, { similarity: 60 }).length === 2, 'un seuil atteint la garde');
+
+  // ── LA 3e BOUGIE DU SECOND MOTIF, INVERSÉE ────────────────────────────────
+  // La figure de référence est une pointe BASSE : son second motif est haussier,
+  // la condition exige donc une 5e bougie BAISSIÈRE. Ici elle est haussière
+  // (111 → 112), la paire doit tomber.
+  ok(candles[5].close > candles[5].open, 'la 5e bougie de la figure est haussière');
+  ok(calcDollars(candles, { reverseThird: true }).length === 0,
+     'second motif haussier + 5e bougie haussière → écartée');
+  ok(calcDollars(candles, {}).length === 2, '… et sans la condition, elle passe');
+
+  // La même figure dont on retourne la 5e bougie : elle rend du terrain.
+  const rendu = C([...BASE.slice(0, 5), [115, 115, 108, 111], [112, 114, 110, 113]]);
+  ok(calcDollars(rendu, {}).length === 2, 'la figure existe toujours');
+  ok(calcDollars(rendu, { reverseThird: true }).length === 2,
+     '5e bougie BAISSIÈRE → la paire est validée');
+
+  // Un doji ne rend rien : il est refusé.
+  const doji = C([...BASE.slice(0, 5), [112, 115, 108, 112], [112, 114, 110, 113]]);
+  ok(calcDollars(doji, {}).length === 2, 'la figure existe');
+  ok(calcDollars(doji, { reverseThird: true }).length === 0, 'un doji hésite → écarté');
+
+  // Miroir : une pointe HAUTE exige une 5e bougie HAUSSIÈRE.
+  const hauteOk = C([
+    [100, 102,  98, 100], [100, 102,  98, 100], [100, 112,  99, 111],
+    [111, 116, 108, 112], [112, 113,  99, 100], [ 99, 104,  98, 103],
+    [103, 105, 101, 104],
+  ]);
+  ok(hauteOk[5].close > hauteOk[5].open, 'sa 5e bougie est haussière');
+  ok(calcDollarSecond(hauteOk, { reverseThird: true })[0]?.side === 'bear',
+     'pointe haute + 5e bougie haussière → validée');
+
+  // LA CONDITION VAUT PARTOUT : tous les dessins, et les positions.
+  ok(calcDollarPivots(candles, { reverseThird: true }).length === 0
+     && calcDollarClouds(candles, { reverseThird: true }).length === 0
+     && calcDollarSecond(candles, { reverseThird: true }).length === 0,
+     'elle s’applique aux quatre autres dessins');
+  ok(calcDollarsPositions(candles, { ...SL5, reverseThird: true }).pairsTotal === 0,
+     '… et aux positions');
 }
 
 console.log('\n── AFFICHAGE SIMPLIFIÉ (le trait) ─────────────────────────────');
@@ -116,6 +156,217 @@ console.log('\n── AFFICHAGE SIMPLIFIÉ (le trait) ────────�
   ok(ph.top === 108, 'son pivot est le plus BAS de la partagée', String(ph.top));
   ok(eh.top === 116, 'son extrême est le plus HAUT de la partagée', String(eh.top));
   ok(eh.side === 'bear', 'et le trait reste au sens du trade — une vente', eh.side);
+
+  // NUAGE — la bande entre les deux niveaux, soit l'amplitude de la partagée.
+  const [nb] = calcDollarClouds(candles, {});
+  ok(nb.top === partagee.high && nb.bottom === partagee.low,
+     'le nuage couvre exactement l’amplitude de la bougie partagée',
+     `${nb.bottom}-${nb.top}`);
+  ok(nb.top === t.top && nb.bottom === e.top,
+     'ses deux bords sont le pivot et l’extrême');
+  ok(nb.hotEdge === 'bottom', 'pointe BASSE → le mur est en BAS, sur l’extrême', nb.hotEdge);
+  const [nh] = calcDollarClouds(haute, {});
+  ok(nh.hotEdge === 'top', 'pointe HAUTE → le mur passe en HAUT', nh.hotEdge);
+  ok(nh.top === 116 && nh.bottom === 108, 'et la bande va du pivot à l’extrême',
+     `${nh.bottom}-${nh.top}`);
+  ok(nb.side === t.side, 'même couleur que les traits : le sens du trade');
+  ok(calcDollarClouds(candles, { direction: 'bull' }).length === 0,
+     'la détection s’applique là aussi à l’identique');
+
+  // ── DISTANCE DU TRAIT EXTRÊME À LA MOYENNE ────────────────────────────────
+  // Période 3 pour que la moyenne soit chaude sur sept bougies. À la bougie
+  // partagée (index 3), SMA(3) = (110 + 100 + 98) / 3 = 102,667.
+  const [mb] = calcDollarClouds(candles, { maDistPeriod: 3 });
+  ok(near(mb.maDist, 102 + 2 / 3 - 97),
+     'pointe BASSE : la mesure est prise sous la moyenne, au départ du trait extrême',
+     String(mb.maDist));
+  ok(mb.maDist > 0,
+     'et elle est POSITIVE — signée dans le sens de la pointe, pas dans celui des prix');
+  ok(mb.maPeriod === 3, 'la zone dit sur quelle période elle a été mesurée');
+
+  // Miroir : une pointe HAUTE au-dessus de sa moyenne rend elle aussi du positif.
+  const [mh] = calcDollarClouds(haute, { maDistPeriod: 3 });
+  ok(near(mh.maDist, 116 - 323 / 3),
+     'pointe HAUTE : même convention, même signe', String(mh.maDist));
+  ok(mh.maDist > 0, 'les deux sens se lisent donc sans retourner le chiffre de tête');
+
+  // LA PREUVE DE LA CONVENTION : les deux figures sont des miroirs, donc l'écart
+  // BRUT de prix (extrême − moyenne) y est de signes opposés — et pourtant les
+  // deux mesures sont positives. C'est bien le sens de la POINTE qui décide, pas
+  // celui des prix. Un signe négatif voudrait alors dire quelque chose de
+  // précis : la pointe n'a pas atteint sa moyenne.
+  ok(mb.extremePrice - (102 + 2 / 3) < 0 && mh.extremePrice - 323 / 3 > 0,
+     'les écarts BRUTS de prix sont de signes opposés');
+  ok(mb.maDist > 0 && mh.maDist > 0,
+     '… et les deux mesures sont POSITIVES : le signe suit la pointe');
+
+  ok(calcDollarClouds(candles, { maDistPeriod: 0 })[0].maDist === null, 'période 0 = éteint');
+  ok(calcDollarClouds(candles, { maDistPeriod: 200 })[0].maDist === null,
+     'moyenne pas encore chaude → rien plutôt qu’un chiffre inventé');
+
+  // Le mode PIVOT ne la calcule pas : le trait qu'il dessine n'est pas l'extrême.
+  ok(calcDollarPivots(candles, { maDistPeriod: 3 })[0].maDist == null,
+     'mode pivot : pas de mesure, le trait n’est pas celui de la pointe');
+  ok(calcDollarPivots(candles, { zoneStyle: 'extreme', maDistPeriod: 3 })[0].maDist > 0,
+     'mode extrême : la mesure revient');
+
+  // ── LE FILTRE DE DISTANCE ─────────────────────────────────────────────────
+  // L'écart mesuré vaut 5,667 sur cette figure. Le seuil porte sur sa VALEUR
+  // ABSOLUE, et un seul des deux peut être actif.
+  const d = mb.maDist;
+  const F = extra => calcDollarClouds(candles, { maDistPeriod: 3, ...extra });
+  ok(F({ maDistMode: 'off', maDistMin: 99 }).length === 1, '« Aucun » : les seuils dorment');
+  ok(F({ maDistMode: 'min', maDistMin: d - 1 }).length === 1, 'minimum atteint → gardée');
+  ok(F({ maDistMode: 'min', maDistMin: d + 1 }).length === 0, 'minimum non atteint → écartée');
+  ok(F({ maDistMode: 'max', maDistMax: d + 1 }).length === 1, 'sous le maximum → gardée');
+  ok(F({ maDistMode: 'max', maDistMax: d - 1 }).length === 0, 'au-dessus du maximum → écartée');
+  // Choisir « max » désarme le minimum, même si sa valeur reste en base.
+  ok(F({ maDistMode: 'max', maDistMax: d + 1, maDistMin: d + 99 }).length === 1,
+     'un seul seuil agit : le minimum resté en base ne s’applique pas');
+
+  // Sans mesure possible, une figure ne peut pas passer un seuil.
+  ok(calcDollarClouds(candles, { maDistPeriod: 200, maDistMode: 'min', maDistMin: 1 }).length === 0,
+     'moyenne pas chaude + seuil actif → écartée, on n’invente pas');
+  ok(calcDollarClouds(candles, { maDistPeriod: 200 }).length === 1,
+     '… mais sans seuil, la figure reste dessinée sans mesure');
+
+  // LE FILTRE VAUT AUSSI POUR LES POSITIONS : c'est une condition du motif.
+  const avec = calcDollarsPositions(candles, { ...SL5, maDistPeriod: 3 });
+  const sans = calcDollarsPositions(candles, {
+    ...SL5, maDistPeriod: 3, maDistMode: 'min', maDistMin: d + 1,
+  });
+  ok(avec.pairsTotal === 1 && sans.pairsTotal === 0,
+     'le seuil retire la figure des POSITIONS, pas seulement du dessin',
+     `${avec.pairsTotal}/${sans.pairsTotal}`);
+
+  // Et il s'applique quel que soit le dessin, même celui qui ne l'affiche pas.
+  ok(calcDollars(candles, { maDistPeriod: 3, maDistMode: 'min', maDistMin: d + 1 }).length === 0,
+     'les boîtes aussi, alors qu’elles n’affichent pas la mesure');
+}
+
+console.log('\n── LA SECONDE BOÎTE, SEULE ────────────────────────────────────');
+{
+  const candles = C([...BASE, [112, 114, 110, 113]]);
+  const deux = calcDollars(candles, {});
+  const [une] = calcDollarSecond(candles, {});
+
+  ok(deux.length === 2 && calcDollarSecond(candles, {}).length === 1,
+     'deux boîtes d’un côté, une seule de l’autre');
+  const seconde = deux.find(z => z.role === 'second');
+  ok(une.idx === seconde.idx && une.top === seconde.top && une.bottom === seconde.bottom,
+     'c’est exactement la boîte du SECOND motif', `${une.bottom}-${une.top}`);
+  // Pointe basse → le second motif est haussier : c'est la zone HAUSSIÈRE qu'on garde.
+  ok(une.pairSide === 'bear' && une.side === 'bull',
+     'paire baissière→haussière : on garde la zone HAUSSIÈRE', `${une.pairSide}/${une.side}`);
+  ok(une.entryPrice === seconde.entryPrice && une.pivotPrice === seconde.pivotPrice,
+     'elle porte les mêmes repères que dans la vue à deux boîtes');
+
+  // Miroir.
+  const haute = C([
+    [100, 102,  98, 100], [100, 102,  98, 100], [100, 112,  99, 111],
+    [111, 116, 108, 112], [112, 113,  99, 100], [100, 104,  98,  99],
+    [ 99, 101,  97,  98],
+  ]);
+  const [uh] = calcDollarSecond(haute, {});
+  ok(uh.pairSide === 'bull' && uh.side === 'bear',
+     'paire haussière→baissière : on garde la zone BAISSIÈRE', `${uh.pairSide}/${uh.side}`);
+
+  // Dans une CHAÎNE, un motif ne peut être le second que d'une paire : pas de
+  // doublon à craindre, et le premier motif de la chaîne disparaît.
+  const chaine = C([
+    [100, 101,  99,   100], [100, 101,  99,   100], [100, 110,  99.5, 109],
+    [109, 112, 108,   110], [110, 111, 100,   101], [101, 103,  99,   100],
+    [100, 112,  99.5, 111], [111, 115, 110,   112], [112, 113, 111,   112],
+  ]);
+  const sec = calcDollarSecond(chaine, {});
+  ok(detectDollarPairs(chaine, {}).length === 2, 'la chaîne fait deux paires');
+  ok(sec.length === 2, 'donc deux secondes boîtes', String(sec.length));
+  ok(new Set(sec.map(z => z.idx)).size === 2, 'et aucune n’est comptée deux fois');
+  ok(calcDollars(chaine, {}).length === 3, '… là où la vue complète en montre trois');
+
+  ok(calcDollarSecond(candles, { direction: 'bull' }).length === 0,
+     'les filtres de détection s’appliquent à l’identique');
+}
+
+console.log('\n── MODE FRACTAL ───────────────────────────────────────────────');
+{
+  // On fabrique la figure de référence EN M15, puis on la découpe en bougies M1 :
+  // le fractal doit y retrouver exactement la même chose.
+  const M15 = 900, M1 = 60;
+  const t0 = Math.floor(1700000000 / M15) * M15;
+  const gros = [...BASE, [112, 114, 110, 113]];     // 7 bougies M15
+
+  // Chaque bougie M15 devient 15 bougies M1 qui la reconstituent : ouverture au
+  // début, extrêmes au milieu, clôture à la fin.
+  const fin = [];
+  gros.forEach(([o, hi, lo, c], g) => {
+    for (let k = 0; k < 15; k++) {
+      const b = t0 + g * M15 + k * M1;
+      if (k === 0)       fin.push({ time: b, open: o, high: o, low: o, close: o });
+      else if (k === 5)  fin.push({ time: b, open: o, high: hi, low: o, close: hi });
+      else if (k === 9)  fin.push({ time: b, open: hi, high: hi, low: lo, close: lo });
+      else if (k === 14) fin.push({ time: b, open: lo, high: Math.max(lo, c), low: Math.min(lo, c), close: c });
+      else               fin.push({ time: b, open: c, high: c, low: c, close: c });
+    }
+  });
+
+  const enM15 = calcDollarClouds(C(gros), {});
+  const enM1  = calcDollarClouds(fin, {});
+  const frac  = fractalZones(fin, { fractalHtf: 'M15' }, calcDollarClouds);
+
+  ok(enM15.length === 1, 'la figure existe en M15');
+  ok(frac.length === 1, 'le fractal la retrouve depuis les bougies M1', String(frac.length));
+  ok(frac[0].top === enM15[0].top && frac[0].bottom === enM15[0].bottom,
+     'MÊMES PRIX qu’en M15 — c’est la figure du HTF, pas une du LTF',
+     `${frac[0].bottom}-${frac[0].top}`);
+  ok(frac[0].hotEdge === enM15[0].hotEdge, 'même mur');
+  ok(enM1.length !== 1 || enM1[0].top !== frac[0].top,
+     'et ce n’est PAS ce que le M1 aurait détecté tout seul');
+
+  // Les temps sont ramenés sur des bougies qui EXISTENT dans le graphe.
+  const heures = new Set(fin.map(c => c.time));
+  ok(heures.has(frac[0].startTime), 'le début tombe sur une bougie du graphe');
+  ok(frac[0].endTime === null || heures.has(frac[0].endTime), 'la fin aussi');
+  ok(frac[0].htf === 'M15', 'la zone dit de quel HTF elle vient', frac[0].htf);
+
+  // L'ÉTIREMENT : extLen compte en bougies M15, donc 15 fois plus large en M1.
+  // La zone part du PIVOT (bougie partagée) et finit `extLen` bougies après la
+  // seconde centrale, soit extLen + 1 buckets — et ces buckets sont des M15.
+  const court = fractalZones(fin, { fractalHtf: 'M15', extLen: 1 }, calcDollarClouds);
+  const large = court[0].endTime - court[0].startTime;
+  ok(large === 2 * M15, 'l’extension se compte en bougies M15, pas en M1',
+     `${large / 60} min`);
+  ok(large === 30 * M1, '… donc 15 fois plus large à l’écran qu’en M1', `${large / 60} min`);
+
+  // La bougie HTF EN COURS est écartée : pas de repaint.
+  const tronque = fin.slice(0, fin.length - 8);   // dernier bucket M15 incomplet
+  ok(fractalZones(tronque, { fractalHtf: 'M15' }, calcDollarClouds).length
+       <= fractalZones(fin, { fractalHtf: 'M15' }, calcDollarClouds).length,
+     'un bucket HTF non clôturé ne produit aucune figure');
+
+  // LA BOUGIE QUI CONFIRME — sur le LTF, pas sur le HTF.
+  const conf = frac[0].confirmTime;
+  ok(heures.has(conf), 'la confirmation tombe sur une bougie du graphe', String(conf));
+  // La figure est complète à la clôture du 6e bucket (readyIdx = 5) : sur le
+  // graphe, c'est la DERNIÈRE bougie M1 que ce bucket contient.
+  const bucketConf = t0 + 5 * M15;
+  ok(conf === bucketConf + M15 - M1,
+     'c’est la DERNIÈRE bougie M1 du bucket M15 qui clôt la figure',
+     `${(conf - bucketConf) / 60} min après le début du bucket`);
+  ok(conf > frac[0].startTime,
+     'elle arrive APRÈS le début du nuage — avant elle, la zone n’existait pas');
+  ok(conf - frac[0].startTime === 2 * M15 + 14 * M1,
+     'soit 44 minutes après le début du nuage, en M1',
+     `${(conf - frac[0].startTime) / 60} min`);
+
+  // Hors fractal, la confirmation est simplement la 5e bougie du motif.
+  const direct = calcDollarClouds(C([...BASE, [112, 114, 110, 113]]), {});
+  ok(direct[0].confirmTime === C(BASE)[5].time,
+     'sans fractal : la 5e bougie de la figure', String(direct[0].confirmTime));
+
+  ok(fractalZones(fin, { fractalHtf: 'ZZ' }, calcDollarClouds).length === 0,
+     'une unité inconnue ne dessine rien plutôt que de planter');
+  ok(fractalZones([], { fractalHtf: 'M15' }, calcDollarClouds).length === 0, 'aucune bougie');
 }
 
 console.log('\n── RSI AVANT L’IMPULSION ──────────────────────────────────────');
@@ -474,6 +725,116 @@ console.log('\n── LOT ──────────────────
      'les deux ÉTUDES aussi : même réglage recommandé à tout lot');
   ok(!near(sf.netPts, se.netPts) && !near(sf.maxDD, se.maxDD),
      '… mais « netPts » et « maxDD » décrivent le COMPTE → eux, ils suivent le lot');
+}
+
+console.log('\n── LE NUAGE, RÉELLEMENT PEINT ─────────────────────────────────');
+{
+  // Un canvas avale en silence tout ce qu'on lui donne de travers : une
+  // coordonnée NaN et la zone disparaît sans un mot. On rejoue donc le dessin
+  // sur un contexte FACTICE qui refuse ce que le vrai accepterait — la seule
+  // façon de savoir qu'un nuage est vraiment à l'écran sans l'ouvrir.
+  const fini = v => typeof v === 'number' && Number.isFinite(v);
+  const RGBA = /^rgba\(\d{1,3},\d{1,3},\d{1,3},(0|1|0?\.\d+)\)$/;
+
+  const dessine = (zones, opts, { hr = 2, vr = 2, prix = p => 400 - (p - 100) * 8 } = {}) => {
+    const bad = []; bad.peints = 0; bad.traits = 0; bad.textes = 0;
+    const grad = () => ({ addColorStop(o, c) {
+      // Le vrai canvas LÈVE sur un offset hors [0,1] ou non fini.
+      if (!fini(o) || o < 0 || o > 1) bad.push(`stop ${o}`);
+      if (!RGBA.test(c)) bad.push(`couleur « ${c} »`);
+    } });
+    const ctx = {
+      _a: 1,
+      set globalAlpha(v) { if (!fini(v) || v < 0 || v > 1) bad.push(`alpha ${v}`); this._a = v; },
+      get globalAlpha() { return this._a; },
+      globalCompositeOperation: '', fillStyle: null, strokeStyle: null,
+      lineWidth: 1, font: '', textBaseline: '',
+      createLinearGradient(...a) { if (a.some(v => !fini(v))) bad.push(`linGrad ${a}`); return grad(); },
+      createRadialGradient(...a) { if (a.some(v => !fini(v))) bad.push(`radGrad ${a}`); return grad(); },
+      fillRect(x, y, w, h) {
+        if (![x, y, w, h].every(fini)) bad.push(`fillRect ${[x, y, w, h]}`);
+        else if (w > 0 && h > 0) bad.peints++;
+      },
+      beginPath() {}, stroke() { bad.traits++; },
+      textAlign: '',
+      fillText(t, x, y) {
+        if (![x, y].every(fini)) bad.push(`fillText ${[x, y]}`);
+        else bad.textes++;
+      },
+      moveTo(x, y) { if (![x, y].every(fini)) bad.push(`moveTo ${[x, y]}`); },
+      lineTo(x, y) { if (![x, y].every(fini)) bad.push(`lineTo ${[x, y]}`); },
+      setLineDash(a) { if (!a.every(fini)) bad.push(`dash ${a}`); },
+    };
+    const prim = createCloudPrimitive();
+    prim.attached({
+      chart:  { timeScale: () => ({ timeToCoordinate: t => (t - 1700000000) / 60 * 9 }) },
+      series: { priceToCoordinate: prix },
+      requestUpdate: () => {},
+    });
+    prim.update(zones, opts);
+    prim.updateAllViews();
+    prim.paneViews()[0].renderer().draw({
+      useBitmapCoordinateSpace: cb => cb({
+        context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr,
+        bitmapSize: { width: 1600, height: 800 },
+      }),
+    });
+    return bad;
+  };
+
+  const nuages = calcDollarClouds(C([...BASE, [112, 114, 110, 113]]), {});
+  const STYLE = { bullColor: '#26A69A', bearColor: '#EF5350', opacity: 0.18, showLabel: true, labelText: '$$$' };
+
+  const n0 = dessine(nuages, STYLE);
+  ok(n0.length === 0, 'aucun appel canvas invalide', n0.slice(0, 3).join(' | '));
+  ok(n0.peints > 20, 'le nuage est RÉELLEMENT peint', `${n0.peints} rectangles`);
+  ok(n0.traits === 3, 'trois traits : le mur, le repère de confirmation, l’arête froide',
+     `${n0.traits}`);
+  ok(dessine(nuages.map(z => ({ ...z, confirmTime: null })), STYLE).traits === 2,
+     'sans confirmation connue, le repère n’est pas tracé');
+
+  const n1 = dessine(nuages, STYLE);
+  ok(n0.peints === n1.peints,
+     'le rendu est STABLE — le nuage ne bouge pas d’un redessin à l’autre');
+
+  ok(dessine(nuages, { ...STYLE, opacity: 0.6 }).length === 0, 'opacité au maximum');
+  ok(dessine(nuages, STYLE, { prix: p => 400 - (p - 100) * 0.3 }).length === 0,
+     'bande écrasée à quelques pixels');
+  ok(dessine(nuages, STYLE, { hr: 1.5, vr: 1.5, prix: p => 4000 - (p - 100) * 200 }).length === 0,
+     'bande géante, écran à ratio fractionnaire');
+  ok(dessine(nuages.map(z => ({ ...z, endTime: null })), STYLE).peints > 20,
+     'zone ouverte, tirée jusqu’au bord droit');
+  ok(dessine(nuages.map(z => ({ ...z, side: 'bear', hotEdge: 'top' })), STYLE).length === 0,
+     'pointe haute : le mur passe en haut');
+  ok(dessine(nuages, STYLE, { prix: () => null }).peints === 0,
+     'prix hors échelle → zone ignorée, sans casse');
+
+  // LE TRAIT DE MESURE — une verticale grise de la pointe à la moyenne.
+  const mesures = calcDollarClouds(C([...BASE, [112, 114, 110, 113]]), { maDistPeriod: 3 });
+  ok(mesures[0].maValue != null, 'la zone porte le PRIX de la moyenne, pas que l’écart',
+     String(mesures[0].maValue));
+  const nm = dessine(mesures, STYLE);
+  ok(nm.length === 0, 'rendu valide avec la mesure', nm.slice(0, 2).join(' | '));
+  ok(nm.traits === 4, 'un trait de plus : mur, confirmation, mesure, arête froide',
+     `${nm.traits}`);
+  ok(dessine(mesures.map(z => ({ ...z, maValue: null })), STYLE).traits === 3,
+     'sans moyenne connue, aucun trait de mesure');
+  ok(nm.textes === 1, 'l’écart est écrit UNE fois — au milieu du trait, pas au mur',
+     `${nm.textes} textes`);
+  // Sans mesure, c'est le nom du motif qui reste contre le mur.
+  ok(dessine(nuages, STYLE).textes === 1, 'sans mesure, l’étiquette du motif reprend sa place');
+  ok(dessine(mesures, { ...STYLE, showLabel: false }).textes === 0, 'labels masqués → rien d’écrit');
+
+  // MASQUER LA MESURE — le trait gris et son chiffre disparaissent, le reste non.
+  const cache = dessine(mesures, { ...STYLE, showMaDist: false });
+  ok(cache.traits === 3, 'trait de mesure masqué', `${cache.traits} traits`);
+  ok(cache.textes === 1, '… et l’étiquette du motif reprend sa place', `${cache.textes}`);
+  ok(cache.peints === nm.peints, 'le nuage lui-même est inchangé');
+  // Masquer n'éteint PAS le filtre : c'est une règle, pas un dessin.
+  const dd = mesures[0].maDist;
+  ok(calcDollarClouds(C([...BASE, [112, 114, 110, 113]]),
+       { maDistPeriod: 3, maDistMode: 'min', maDistMin: dd + 1 }).length === 0,
+     'masquer le trait n’éteint pas le seuil — seul « Aucun » le fait');
 }
 
 console.log(fails ? `\n${fails} ÉCHEC(S) sur ${total}` : `\nTout passe (${total} assertions).`);

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
-import { groupCandles } from '../lib/candleData';
+import { groupCandles, heikinAshi } from '../lib/candleData';
 import { TF_SECONDS }   from '../lib/replayUtils';
 import dynamic from 'next/dynamic';
 import { useSymbols }     from '../hooks/useSymbols';
@@ -73,11 +73,18 @@ export default function Home() {
   const hasTicks       = (currentSym?.tick_count ?? 0) > 0;
   const inFootprint    = chartMode === 'footprint' && hasTicks;
 
-  // In "grouped" mode, merge consecutive same-direction candles into trend bars.
-  const displayBars = useMemo(
-    () => (chartMode === 'grouped' ? groupCandles(allBars) : allBars),
-    [chartMode, allBars],
-  );
+  // LE MODE CHOISIT LA SÉRIE, et la série est la source de tout le reste :
+  // indicateurs, motifs, scripts et infobulle lisent ces bougies-là.
+  //   • grouped — les bougies consécutives de même sens fusionnent en une barre
+  //     de tendance ; la série n'est plus régulière dans le temps ;
+  //   • heikin  — mêmes temps, prix LISSÉS (des moyennes, pas des prix traités) ;
+  //   • candle / line — les bougies brutes, la ligne n'étant qu'un autre rendu
+  //     de la même série (les clôtures), tracé côté TradingChart.
+  const displayBars = useMemo(() => {
+    if (chartMode === 'grouped') return groupCandles(allBars);
+    if (chartMode === 'heikin')  return heikinAshi(allBars);
+    return allBars;
+  }, [chartMode, allBars]);
 
   // Merge stored patterns with PATTERN_TYPES so newly-added patterns render even
   // when the user's localStorage predates them. Stored values win over defaults.
@@ -233,7 +240,10 @@ export default function Home() {
                 selectedTradeId={scriptTradeId}
                 focusRange={scriptFocus}
                 watermarkText={currentSym ? `${currentSym.name} · ${tfId.toUpperCase()}` : ''}
-                cvdData={chartMode === 'candle' ? cvdData : null}
+                cvdData={chartMode === 'grouped'
+                  /* Le CVD est daté à la bougie : il ne vaut que sur une série
+                     régulière dans le temps, ce que 'grouped' n'est pas. */
+                  ? null : cvdData}
                 drawings={drawings}
                 activeTool={activeTool}
                 selectedId={selectedId}
@@ -262,6 +272,7 @@ export default function Home() {
           symbolName={currentSym?.name ?? ''}
           tfId={tfId}
           patterns={effectivePatterns}
+          htfBars={htfBars}
           config={scriptConfig}
           onChange={setScriptConfig}
           onTradesChange={setScriptTrades}

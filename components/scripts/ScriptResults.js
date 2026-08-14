@@ -28,7 +28,7 @@ const REASON_SHORT = {
 // Une seule série : pas de légende, le titre la nomme. Ligne de 2 px, grille
 // muette, valeur finale étiquetée en clair — et le survol donne la valeur exacte
 // à la bougie, plutôt qu'un nombre posé sur chaque point.
-function EquityChart({ curve, capital }) {
+function EquityChart({ curve, capital, titre = 'Équité' }) {
   const wrapRef = useRef(null);
   const [w, setW] = useState(360);
   const [hover, setHover] = useState(null);
@@ -92,7 +92,7 @@ function EquityChart({ curve, capital }) {
   return (
     <div className={styles.chartWrap} ref={wrapRef}>
       <div className={styles.chartHead}>
-        <span className={styles.chartTitle}>Équité, bougie par bougie</span>
+        <span className={styles.chartTitle}>{titre}, bougie par bougie</span>
         <span className={styles.chartScale}>{fmtUsd(min, { decimals: 0 })} → {fmtUsd(max, { decimals: 0 })}</span>
       </div>
 
@@ -186,7 +186,12 @@ export default function ScriptResults({
           {fmtUsd(s.netProfit, { sign: true })}
         </span>
         <span className={styles.heroSub}>
-          {fmtPct(s.netProfitPct, { sign: true })} · solde final {fmtUsd(s.finalBalance)} ·{' '}
+          {fmtPct(s.netProfitPct, { sign: true })} ·{' '}
+          {/* Dès qu'un script sort de l'argent du compte, le solde du broker ne
+              dit plus où on en est : c'est le PATRIMOINE qu'il faut lire. */}
+          {s.external !== 0
+            ? <>patrimoine {fmtUsd(s.finalWealth)} (dont {fmtUsd(s.finalBalance)} chez le broker)</>
+            : <>solde final {fmtUsd(s.finalBalance)}</>} ·{' '}
           {fmtCount(s.total)} trade{s.total > 1 ? 's' : ''}
         </span>
         {s.ruined && (
@@ -196,7 +201,13 @@ export default function ScriptResults({
         )}
       </div>
 
-      <EquityChart curve={run.equityCurve} capital={s.capital} />
+      {/* Dès qu'un script retire de l'argent, la courbe de l'équité ne montre
+          plus que la poche laissée chez le broker — une droite plate qui cache
+          exactement ce qu'on veut voir. On trace alors le PATRIMOINE. */}
+      {s.withdrawals > 0 || s.deposits > 0
+        ? <EquityChart titre="Patrimoine" capital={s.capital}
+                       curve={run.equityCurve.map(p => ({ ...p, equity: p.wealth ?? p.equity }))} />
+        : <EquityChart curve={run.equityCurve} capital={s.capital} />}
 
       {/* ── Ce que le compte a traversé ───────────────────────────────── */}
       <div className={styles.flags}>
@@ -237,6 +248,20 @@ export default function ScriptResults({
         <Kpi label="Lots cumulés"   value={s.totalLots.toFixed(2)} />
         <Kpi label="Achats / ventes" value={`${s.longs} / ${s.shorts}`}
              hint={`${s.longsWon} et ${s.shortsWon} gagnants`} />
+        {/* Trésorerie — n'apparaît que si le script a bougé de l'argent. Pour
+            les autres, ces trois cases vaudraient zéro et n'apprendraient rien. */}
+        {(s.withdrawals > 0 || s.deposits > 0) && <>
+          <Kpi label="Mis à l'abri"  value={fmtUsd(s.withdrawals, { decimals: 0 })} tone="pos"
+               hint="Retiré du compte — hors d'atteinte de la marge et des spikes" />
+          <Kpi label="Rechargé"      value={fmtUsd(s.deposits, { decimals: 0 })}
+               hint="Remis sur le compte depuis la réserve" />
+          <Kpi label="Hors du compte" value={fmtUsd(s.external, { decimals: 0 })}
+               hint="Ce qui dort dehors à la fin — le patrimoine vaut solde + ce montant" />
+        </>}
+        {s.wipes > 0 && (
+          <Kpi label="Soldes effacés" value={`${s.wipes} · ${fmtUsd(s.absorbed, { decimals: 0 })}`} tone="neg"
+               hint="Pertes qui dépassaient le solde : le broker les a absorbées. Sans cette protection, le profit net serait diminué d'autant" />
+        )}
       </div>
 
       <p className={styles.period}>

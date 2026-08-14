@@ -8,7 +8,10 @@
     "start": "next start",
     "telegram": "node scripts/telegram-chatid.mjs",
     "rsi-lab": "node scripts/rsi-lab.mjs",
-    "dollars-test": "node --import ./scripts/esm-hooks.mjs scripts/dollars-selftest.mjs"
+    "dollars-test": "node --import ./scripts/esm-hooks.mjs scripts/dollars-selftest.mjs",
+    "ichimoku-test": "node --import ./scripts/esm-hooks.mjs scripts/ichimoku-selftest.mjs",
+    "mc-test": "node --import ./scripts/esm-hooks.mjs scripts/mc-selftest.mjs",
+    "boom-test": "node --import ./scripts/esm-hooks.mjs scripts/boom-rsier-selftest.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

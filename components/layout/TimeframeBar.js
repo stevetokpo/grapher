@@ -37,6 +37,31 @@ function GroupedIcon() {
   );
 }
 
+function LineIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+      <path d="M1 9.5 L4 5.5 L6.5 7.5 L9 3 L12 6"
+        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M1 9.5 L4 5.5 L6.5 7.5 L9 3 L12 6 L12 12 L1 12 Z"
+        fill="currentColor" opacity="0.18" />
+    </svg>
+  );
+}
+
+// Heikin Ashi : des corps qui se touchent, l'ouverture de l'un collée à la
+// clôture de l'autre — c'est ce que le lissage produit à l'écran.
+function HeikinIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+      <rect x="1.5" y="7"   width="3.5" height="4" rx="0.5" fill="currentColor" opacity="0.55" />
+      <rect x="5.5" y="4.5" width="3.5" height="2.5" rx="0.5" fill="currentColor" opacity="0.75" />
+      <rect x="9.5" y="2"   width="3.5" height="2.5" rx="0.5" fill="currentColor" opacity="0.95" />
+      <line x1="3.25"  y1="11.5" x2="3.25"  y2="12.5" stroke="currentColor" strokeWidth="1" opacity="0.55" />
+      <line x1="11.25" y1="0.5"  x2="11.25" y2="2"    stroke="currentColor" strokeWidth="1" opacity="0.95" />
+    </svg>
+  );
+}
+
 function FootprintIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
@@ -195,7 +220,7 @@ export default function TimeframeBar({
         </div>
       )}
 
-      {/* Chart mode toggle — Candle/Grouped always available, Footprint needs ticks */}
+      {/* Chart mode toggle — tous les types sauf Footprint, qui exige des ticks */}
       <div className={styles.viewToggle} role="group" aria-label="Chart type">
         <button
           className={`${styles.viewBtn}${chartMode === 'candle' ? ` ${styles.viewActive}` : ''}`}
@@ -205,6 +230,24 @@ export default function TimeframeBar({
         >
           <CandleIcon />
           Candle
+        </button>
+        <button
+          className={`${styles.viewBtn}${chartMode === 'line' ? ` ${styles.viewActive}` : ''}`}
+          onClick={() => onChartModeChange('line')}
+          aria-pressed={chartMode === 'line'}
+          title="Ligne des clôtures — couleur, épaisseur et remplissage dans Réglages › Bougies"
+        >
+          <LineIcon />
+          Line
+        </button>
+        <button
+          className={`${styles.viewBtn}${chartMode === 'heikin' ? ` ${styles.viewActive}` : ''}`}
+          onClick={() => onChartModeChange('heikin')}
+          aria-pressed={chartMode === 'heikin'}
+          title="Heikin Ashi — bougies lissées par la précédente. Les prix affichés sont des moyennes, pas des prix traités : indicateurs et motifs les lisent tels quels."
+        >
+          <HeikinIcon />
+          Heikin
         </button>
         <button
           className={`${styles.viewBtn}${chartMode === 'grouped' ? ` ${styles.viewActive}` : ''}`}

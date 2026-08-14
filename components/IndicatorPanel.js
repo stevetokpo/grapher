@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import styles from './IndicatorPanel.module.css';
 import { RANGE_DEFAULTS, rangeLabel } from '../lib/periodZones';
+import { ICHIMOKU_DEFAULTS } from '../lib/ichimoku';
 
 export const MA_COLORS = [
   '#60A5FA', '#F59E0B', '#A78BFA', '#F472B6',
@@ -35,6 +36,7 @@ const INDICATOR_TYPES = [
   { type: 'EQ',    label: 'EQ',    desc: 'Point d\'équilibre', color: '#A78BFA', pane: 'overlay'  },
   { type: 'TRENDER', label: 'TRENDER', desc: 'Harmonie multi-HTF', color: '#34D399', pane: 'overlay' },
   { type: 'RANGE', label: 'RANGE', desc: 'Zones par période', color: '#60A5FA', pane: 'overlay' },
+  { type: 'KUMO',  label: 'KUMO',  desc: 'Nuage d\'Ichimoku', color: '#26A69A', pane: 'overlay' },
 ];
 
 // Unités de temps supérieures (notation MT5), pour les 3 HTF de biais.
@@ -64,6 +66,13 @@ const DEFAULT_FORM = {
   bgTransp: 80, showBg: true, showMark: true, showConf: true, showSlLn: true,
   bullColor: '#26A69A', bearColor: '#EF5350', slColor: '#EF5350',
   showBbCur: true, bbCurLen: 50, bbCurMult: 0.369, bbCurColor: '#60A5FA',
+  // KUMO — Ichimoku. Les périodes historiques (9/26/52) et le décalage de 26
+  // bougies ; les couleurs des deux bords du nuage sont bullColor/bearColor,
+  // partagées avec les autres indicateurs de zone.
+  ...ICHIMOKU_DEFAULTS,
+  showTenkan: true, showKijun: true, showSpans: true, showChikou: true, showCloud: true,
+  cloudOpacity: 16,
+  tenkanColor: '#60A5FA', kijunColor: '#F472B6', chikouColor: '#94A3B8',
   // RANGE — les défauts vivent avec le calcul (lib/periodZones.js), pas ici :
   // ajouter un réglage à l'indicateur ne demande alors qu'un champ de formulaire.
   ...RANGE_DEFAULTS,
@@ -122,6 +131,13 @@ function indParams(ind) {
     ].filter(Boolean).join(' · ');
     return htf || 'aucun HTF';
   }
+  if (ind.type === 'KUMO') {
+    return [
+      `décal. ${ind.displacement ?? 26}`,
+      ind.showCloud !== false ? 'nuage' : 'lignes seules',
+      ind.showChikou !== false && 'chikou',
+    ].filter(Boolean).join(' · ');
+  }
   if (ind.type === 'RANGE') {
     return [
       ind.basis === 'body' ? 'corps' : 'mèches',
@@ -138,6 +154,7 @@ function indPeriodLabel(ind) {
   if (ind.type === 'EQ')      return String(ind.lookback ?? 60);
   if (ind.type === 'TRENDER') return `BB ${ind.bbLen ?? 50}`;
   if (ind.type === 'RANGE')   return rangeLabel(ind);
+  if (ind.type === 'KUMO')    return `${ind.tenkanLen ?? 9}/${ind.kijunLen ?? 26}/${ind.senkouLen ?? 52}`;
   return String(ind.period ?? '—');
 }
 
@@ -189,6 +206,10 @@ export default function IndicatorPanel({ indicators, onChange, onClose }) {
         const to   = (form.toHour   ?? 0) * 60 + (form.toMin   ?? 0);
         if (from === to) return;
       } else if ((form.markLen ?? 4) < 1) return;
+    } else if (selected === 'KUMO') {
+      // Une fenêtre vide ne donnerait aucune ligne, et sans Senkou il ne reste
+      // rien à remplir : les trois périodes doivent exister.
+      if ((form.tenkanLen ?? 9) < 1 || (form.kijunLen ?? 26) < 1 || (form.senkouLen ?? 52) < 1) return;
     } else if (form.period < 2 || form.period > 500) return;
 
     if (editingId) {
@@ -867,6 +888,105 @@ export default function IndicatorPanel({ indicators, onChange, onClose }) {
               </>
             )}
 
+            {/* KUMO fields */}
+            {selected === 'KUMO' && (
+              <>
+                <p className={styles.hint}>
+                  L’Ichimoku, dont l’essentiel est le <strong>nuage</strong> : la surface entre
+                  les deux Senkou, tracée <strong>{form.displacement ?? 26} bougies en avance</strong>
+                  {' '}sur le prix. Support et résistance sont donc connus avant que le marché n’y
+                  arrive. Le nuage est vert quand Senkou A est au-dessus, rouge sinon ; son
+                  <em> épaisseur</em> dit la force du niveau. Chaque ligne est le milieu du canal
+                  (plus haut + plus bas) / 2 de sa fenêtre — pas une moyenne de clôtures. Le
+                  Chikou, lui, est la clôture ramenée {form.displacement ?? 26} bougies en arrière.
+                </p>
+
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Tenkan (conversion)</span>
+                    <NumInput value={form.tenkanLen ?? 9} min={1} max={200} onChange={v => setF({ tenkanLen: v })} />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Kijun (base)</span>
+                    <NumInput value={form.kijunLen ?? 26} min={1} max={400} onChange={v => setF({ kijunLen: v })} />
+                  </div>
+                </div>
+                <div className={styles.fieldRow}>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Senkou B</span>
+                    <NumInput value={form.senkouLen ?? 52} min={1} max={600} onChange={v => setF({ senkouLen: v })} />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Décalage (bougies)</span>
+                    <NumInput value={form.displacement ?? 26} min={0} max={200} onChange={v => setF({ displacement: v })} />
+                  </div>
+                </div>
+
+                {/* Le nuage */}
+                <div className={styles.markerGroup}>
+                  <span className={styles.markerGroupLabel} style={{ color: form.bullColor ?? '#26A69A' }}>
+                    Nuage
+                  </span>
+                  <div className={styles.fieldRow}>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Senkou A dessus</span>
+                      <Swatches value={form.bullColor ?? '#26A69A'} onChange={c => setF({ bullColor: c })} />
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Senkou A dessous</span>
+                      <Swatches value={form.bearColor ?? '#EF5350'} onChange={c => setF({ bearColor: c })} />
+                    </div>
+                  </div>
+                  <div className={styles.fieldRow}>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Remplissage (%)</span>
+                      <NumInput value={form.cloudOpacity ?? 16} min={0} max={100} onChange={v => setF({ cloudOpacity: v })} />
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.label}>Nuage rempli</span>
+                      <button
+                        className={`${styles.toggleBtn}${form.showCloud !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                        onClick={() => setF({ showCloud: form.showCloud === false })}
+                      >{form.showCloud !== false ? 'Activé' : 'Désactivé'}</button>
+                    </div>
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.label}>Bords du nuage (Senkou A et B)</span>
+                    <button
+                      className={`${styles.toggleBtn}${form.showSpans !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                      onClick={() => setF({ showSpans: form.showSpans === false })}
+                    >{form.showSpans !== false ? 'Affichés' : 'Masqués'}</button>
+                  </div>
+                </div>
+
+                {/* Les trois autres lignes */}
+                <div className={styles.markerGroup}>
+                  <span className={styles.markerGroupLabel} style={{ color: form.tenkanColor ?? '#60A5FA' }}>
+                    Lignes
+                  </span>
+                  {[
+                    ['Tenkan', 'tenkanColor', '#60A5FA', 'showTenkan'],
+                    ['Kijun',  'kijunColor',  '#F472B6', 'showKijun'],
+                    ['Chikou', 'chikouColor', '#94A3B8', 'showChikou'],
+                  ].map(([label, colorKey, fallback, showKey]) => (
+                    <div className={styles.fieldRow} key={colorKey}>
+                      <div className={styles.field}>
+                        <span className={styles.label}>{label}</span>
+                        <Swatches value={form[colorKey] ?? fallback} onChange={c => setF({ [colorKey]: c })} />
+                      </div>
+                      <div className={styles.field}>
+                        <span className={styles.label}>Affichage</span>
+                        <button
+                          className={`${styles.toggleBtn}${form[showKey] !== false ? ` ${styles.toggleBtnOn}` : ''}`}
+                          onClick={() => setF({ [showKey]: form[showKey] === false })}
+                        >{form[showKey] !== false ? 'Activé' : 'Désactivé'}</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
             <button
               className={`${styles.addBtn}${editingId ? ` ${styles.saveBtn}` : ''}`}
               onClick={save}
@@ -901,6 +1021,11 @@ export default function IndicatorPanel({ indicators, onChange, onClose }) {
                       <span className={styles.twoDots}>
                         <span className={styles.colorDot} style={{ background: ind.highColor ?? '#F59E0B' }} />
                         <span className={styles.colorDot} style={{ background: ind.lowColor  ?? '#60A5FA' }} />
+                      </span>
+                    ) : ind.type === 'KUMO' ? (
+                      <span className={styles.twoDots}>
+                        <span className={styles.colorDot} style={{ background: ind.bullColor ?? '#26A69A' }} />
+                        <span className={styles.colorDot} style={{ background: ind.bearColor ?? '#EF5350' }} />
                       </span>
                     ) : (
                       <span className={styles.colorDot} style={{ background: ind.color }} />

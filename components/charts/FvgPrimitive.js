@@ -28,6 +28,8 @@
 // came back to; families that leave the field out draw exactly what they drew
 // before.
 
+import { fmtEcart, traitDeMesure } from './CloudPrimitive';
+
 const GREY  = '#64748B'; // mitigated / consumed gaps
 const LEVEL = '#FFFFFF'; // optional price level inside a zone — opaque white, on purpose
 
@@ -50,7 +52,12 @@ function zoneLabel(zone, opts) {
   const base = zone.label ?? opts.labelText ?? 'FVG';
   if (zone.state === 'inverse')   return `i${base}`;
   if (zone.state === 'mitigated') return '';      // keep greyed gaps unlabelled (less noise)
-  return base;
+  // A zone carrying a measured distance ($$$ in extreme mode) prints that number
+  // in the MIDDLE of its measure line instead — see traitDeMesure. Repeating the
+  // family name next to it teaches nothing, so the label is dropped there. When
+  // the measure is hidden, the name comes back: otherwise nothing would be
+  // written at all.
+  return zone.maDist != null && opts.showMaDist !== false ? '' : base;
 }
 
 class FvgRenderer {
@@ -92,6 +99,17 @@ class FvgRenderer {
           ctx.lineTo(x2, yTop + 0.5);
           ctx.stroke();
 
+          // Le trait de mesure, coupé en son milieu pour y loger l'écart. Même
+          // dessin que dans le nuage — c'est la même mesure, elle doit se lire
+          // pareil d'un mode à l'autre.
+          if (r.yMa != null) {
+            traitDeMesure(ctx, {
+              x: x1, yA: yTop, yB: Math.round(r.yMa * vr),
+              texte: data.showLabel ? r.ecart : null,
+              alpha: 0.6, hr, vr,
+            });
+          }
+
           if (data.showLabel && r.label) {
             ctx.fillStyle = hexToRgba(r.color, 1);
             ctx.font = `${Math.round(10 * vr)}px Inter, system-ui, sans-serif`;
@@ -115,6 +133,20 @@ class FvgRenderer {
         ctx.moveTo(x1, yBottom - 0.5); ctx.lineTo(x2, yBottom - 0.5);
         ctx.stroke();
         ctx.setLineDash([]);
+
+        // La cote de mesure DANS une boîte pleine. Le cas plat, plus haut, la
+        // fait toujours partir du bord de la zone — le trait EST le niveau
+        // mesuré. Une boîte, elle, n'a pas de bord qui soit ce prix-là : elle
+        // doit dire d'où part la mesure, et c'est `mesureDepuis`. Une famille
+        // qui ne pose pas ce champ ne dessine rien de plus, exactement comme
+        // avant : le $$$ et ses boîtes n'ont pas bougé d'un pixel.
+        if (r.yMa != null && r.yDepuis != null) {
+          traitDeMesure(ctx, {
+            x: x1, yA: Math.round(r.yDepuis * vr), yB: Math.round(r.yMa * vr),
+            texte: data.showLabel ? r.ecart : null,
+            alpha: 0.75, hr, vr,
+          });
+        }
 
         // Le niveau, quand la zone en porte un : un trait plein, du pivot
         // jusqu'au bord droit de la boîte. Il part donc à gauche de la zone —
@@ -193,6 +225,15 @@ class FvgPaneView {
         level,
         // Épaisseur du trait, quand la zone est plate. Ignorée sinon.
         thickness: z.thickness,
+        // Le prix de la moyenne, quand la zone en mesure une : de quoi relier
+        // les deux points d'un trait. `ecart` est le nombre qui s'écrit dedans.
+        yMa: opts.showMaDist !== false && z.maValue != null
+          ? series.priceToCoordinate(z.maValue) : null,
+        // D'où part la cote quand la zone a de la hauteur (cf. le rendu). Absent
+        // = comportement d'avant, la mesure part du bord de la zone plate.
+        yDepuis: opts.showMaDist !== false && z.mesureDepuis != null
+          ? series.priceToCoordinate(z.mesureDepuis) : null,
+        ecart: opts.showMaDist !== false ? fmtEcart(z.maDist) : null,
       });
     }
 
